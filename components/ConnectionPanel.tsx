@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Zap, Link as LinkIcon, Cpu, Terminal, Loader2, Info, Activity, AlertCircle, Cable, Settings2, Bluetooth, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Zap, Link as LinkIcon, Cpu, Terminal, Loader2, Info, Activity, AlertCircle, Cable, Settings2, Bluetooth, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react';
 import { ConnectionStatus, HardwareStatus } from '../types.ts';
 import ESP32SetupGuide from './ESP32SetupGuide.tsx';
 
@@ -28,13 +28,31 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   debugLog = []
 }) => {
   const [showSetup, setShowSetup] = useState(false);
-  const [btSupported, setBtSupported] = useState<boolean | null>(null);
+  const [btSupported, setBtSupported] = useState<boolean>(true);
   const [isHttps, setIsHttps] = useState(true);
+  const [forceEnable, setForceEnable] = useState(false);
 
   useEffect(() => {
-    setBtSupported(!!(navigator as any).bluetooth);
-    setIsHttps(window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    // Some mobile wrappers inject navigator.bluetooth after a small delay
+    const checkSupport = () => {
+        const hasBT = !!(navigator as any).bluetooth;
+        setBtSupported(hasBT);
+    };
+    
+    checkSupport();
+    const timer = setTimeout(checkSupport, 2000);
+    
+    setIsHttps(
+        window.location.protocol === 'https:' || 
+        window.location.hostname === 'localhost' || 
+        window.location.hostname === '127.0.0.1' ||
+        window.location.protocol === 'file:' // Support for local file access in some wrappers
+    );
+    
+    return () => clearTimeout(timer);
   }, []);
+
+  const isBluetoothBlocked = hardwareMode === 'esp32-bt' && (!btSupported && !forceEnable);
 
   return (
     <div className="flex flex-col gap-4 w-full max-w-5xl mx-auto pt-2 animate-in fade-in pb-10 overflow-y-auto max-h-full custom-scrollbar">
@@ -46,7 +64,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
          </div>
          <div className="flex-1">
             <h4 className="text-[11px] font-orbitron font-black text-indigo-900 uppercase tracking-widest">Hardware Interfacing</h4>
-            <p className="text-[10px] text-indigo-600 font-medium leading-relaxed">Choose between high-speed <span className="font-bold">PCAN WebSocket</span>, wired <span className="font-bold">ESP32 Serial</span>, or wireless <span className="font-bold">ESP32 Bluetooth</span>.</p>
+            <p className="text-[10px] text-indigo-600 font-medium leading-relaxed">Mobile App Mode Detected. Ensure you are using <span className="font-bold text-indigo-800 underline">Trusted Web Activity</span> in Android Studio for Bluetooth support.</p>
          </div>
       </div>
 
@@ -106,15 +124,23 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                  </div>
                  <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between text-[10px] font-bold">
-                        <span className="text-slate-500">Browser Support</span>
+                        <span className="text-slate-500">Browser/App Support</span>
                         {btSupported ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-red-500" />}
                     </div>
-                    <div className="flex items-center justify-between text-[10px] font-bold">
-                        <span className="text-slate-500">Security (HTTPS)</span>
-                        {isHttps ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-red-500" />}
-                    </div>
                  </div>
-                 {!isHttps && <p className="text-[8px] text-red-500 font-bold uppercase leading-tight">* Web Bluetooth requires an HTTPS connection or Localhost.</p>}
+                 {!btSupported && (
+                    <div className="mt-2 p-3 bg-red-50 border border-red-100 rounded-xl">
+                        <p className="text-[8px] text-red-600 font-bold uppercase leading-tight mb-2">
+                            Bluetooth is disabled in this WebView.
+                        </p>
+                        <button 
+                            onClick={() => setForceEnable(true)}
+                            className="text-[8px] bg-red-600 text-white px-3 py-1 rounded-md font-black uppercase"
+                        >
+                            Force Bypass Check
+                        </button>
+                    </div>
+                 )}
               </div>
             )}
 
@@ -138,21 +164,12 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                 </div>
               </div>
             )}
-
-            {(hardwareMode === 'esp32-serial' || hardwareMode === 'esp32-bt') && (
-              <button 
-                onClick={() => setShowSetup(true)}
-                className="mt-2 text-[9px] font-orbitron font-black text-indigo-600 uppercase tracking-widest text-left hover:underline flex items-center gap-2"
-              >
-                <Info size={12} /> View Bridge Firmware Guide →
-              </button>
-            )}
           </div>
           
           <div className="space-y-6">
             <button 
               onClick={() => status === 'connected' ? onDisconnect() : onConnect()}
-              disabled={status === 'connecting' || (hardwareMode === 'esp32-bt' && (!btSupported || !isHttps))}
+              disabled={status === 'connecting' || isBluetoothBlocked}
               className={`w-full py-6 rounded-3xl text-[11px] font-orbitron font-black uppercase tracking-[0.4em] transition-all flex items-center justify-center gap-4 shadow-xl active:scale-95 ${
                 status === 'connected' ? 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/20'
               } disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -170,11 +187,6 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               <Terminal size={18} className="text-slate-500" />
               <span className="text-[12px] font-orbitron font-black text-slate-800 uppercase tracking-widest">Link_Console</span>
             </div>
-            {status === 'connected' && (
-              <div className="flex items-center gap-2 text-[9px] font-black text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100 animate-pulse">
-                <Activity size={10} /> STREAM_ACTIVE
-              </div>
-            )}
           </div>
           
           <div className="flex-1 bg-slate-900 rounded-3xl p-6 font-mono text-[11px] text-emerald-500/80 overflow-y-auto custom-scrollbar flex flex-col-reverse shadow-2xl border border-slate-800">
