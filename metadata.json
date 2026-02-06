@@ -1,7 +1,9 @@
+
 {
   "name": "OSM Tactical PCAN HUD 01",
   "description": "High-performance CAN bus monitoring and diagnostic tool featuring real-time message visualization and Gemini-powered signal analysis.",
   "requestFramePermissions": [
-    "serial"
+    "serial",
+    "bluetooth"
   ]
 }

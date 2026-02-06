@@ -1,5 +1,5 @@
 
-const CACHE_NAME = 'osm-v12-cache';
+const CACHE_NAME = 'osm-live-v1';
 const urlsToCache = [
   '/',
   '/index.html',
