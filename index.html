@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSM Live | Tactical HUD</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --neon-indigo: #4f46e5;
+            --neon-emerald: #059669;
+            --neon-amber: #d97706;
+            --neon-red: #dc2626;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #ffffff;
+            color: #0f172a;
+            overflow: hidden;
+            height: 100vh;
+        }
+        .font-orbitron { font-family: 'Orbitron', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Tactical Grid Background (Light Mode) */
+        .cyber-grid {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-image: 
+                linear-gradient(to right, rgba(79, 70, 229, 0.04) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(79, 70, 229, 0.04) 1px, transparent 1px);
+            background-size: 50px 50px;
+            perspective: 1000px;
+            transform: rotateX(60deg) translateY(-200px) translateZ(-500px);
+            z-index: -1;
+            animation: gridMove 20s linear infinite;
+        }
+
+        @keyframes gridMove {
+            from { background-position: 0 0; }
+            to { background-position: 0 500px; }
+        }
+
+        /* Glassmorphism Light Mode */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid rgba(79, 70, 229, 0.15);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.05);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .glass-panel:hover {
+            border-color: rgba(79, 70, 229, 0.3);
+            box-shadow: 0 12px 48px 0 rgba(79, 70, 229, 0.1);
+        }
+
+        /* Neon Text Glow (Adjusted for Light BG) */
+        .glow-text-indigo { text-shadow: 0 0 12px rgba(79, 70, 229, 0.3); }
+        .glow-text-emerald { text-shadow: 0 0 12px rgba(5, 150, 105, 0.3); }
+        .glow-text-red { text-shadow: 0 0 12px rgba(220, 38, 38, 0.3); }
+
+        /* Row Entrance Animation */
+        @keyframes slideInRow {
+            from { opacity: 0; transform: scale(0.98) translateY(5px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .animate-frame {
+            animation: slideInRow 0.15s ease-out forwards;
+        }
+
+        @keyframes pulse-slow {
+            0%, 100% { border-color: rgba(220, 38, 38, 0.2); box-shadow: 0 0 15px rgba(220, 38, 38, 0.05); }
+            50% { border-color: rgba(220, 38, 38, 0.4); box-shadow: 0 0 25px rgba(220, 38, 38, 0.1); }
+        }
+        .animate-pulse-slow {
+            animation: pulse-slow 2s infinite ease-in-out;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.03); }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(79, 70, 229, 0.2);
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover { background: var(--neon-indigo); }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "recharts": "https://esm.sh/recharts@^3.6.0",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "path": "https://esm.sh/path@^0.12.7",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "url": "https://esm.sh/url@^0.11.4"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+    <div class="cyber-grid"></div>
+    <div id="root"></div>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
