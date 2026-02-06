@@ -13,8 +13,8 @@ type AppView = 'home' | 'live';
 type DashboardTab = 'link' | 'trace' | 'library' | 'analysis';
 type HardwareMode = 'pcan' | 'esp32-serial' | 'esp32-bt';
 
-const MAX_FRAME_LIMIT = 5000; // Lowered slightly for mobile memory
-const BATCH_UPDATE_INTERVAL = 60; // Slightly higher for mobile CPU efficiency
+const MAX_FRAME_LIMIT = 5000;
+const BATCH_UPDATE_INTERVAL = 60;
 
 const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const UART_TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
@@ -22,7 +22,7 @@ const UART_TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('home');
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>('link');
-  const [hardwareMode, setHardwareMode] = useState<HardwareMode>('esp32-bt'); // Default to BLE for mobile
+  const [hardwareMode, setHardwareMode] = useState<HardwareMode>('esp32-bt');
   const [frames, setFrames] = useState<CANFrame[]>([]);
   const [latestFrames, setLatestFrames] = useState<Record<string, CANFrame>>({});
   const [isPaused, setIsPaused] = useState(false);
@@ -45,14 +45,12 @@ const App: React.FC = () => {
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
   const sessionStartTimeRef = useRef<number>(performance.now());
-  const socketRef = useRef<WebSocket | null>(null);
   const serialPortRef = useRef<any | null>(null);
   const serialReaderRef = useRef<any | null>(null);
   const btDeviceRef = useRef<any | null>(null);
   const frameMapRef = useRef<Map<string, CANFrame>>(new Map());
   const pendingFramesRef = useRef<CANFrame[]>([]);
   const lastUpdateRef = useRef<number>(0);
-  const autoSaveCountRef = useRef<number>(0);
 
   const addDebugLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
@@ -62,10 +60,10 @@ const App: React.FC = () => {
   const handleSaveTrace = useCallback(async (framesToSave: CANFrame[]) => {
     if (framesToSave.length === 0) return;
     setIsSaving(true);
-    addDebugLog(`SYSTEM: AUTO-SAVING TRACE...`);
+    addDebugLog(`SYSTEM: EXPORTING TRACE...`);
     
     try {
-      const header = "; PCAN Trace File\n; Created by OSM Tactical HUD Mobile\n;-------------------------------------------------------------------------------\n";
+      const header = "; PCAN Trace File\n; Created by OSM Tactical HUD\n;-------------------------------------------------------------------------------\n";
       const rows: string[] = [header];
       for (let i = 0; i < framesToSave.length; i++) {
         const f = framesToSave[i];
@@ -79,7 +77,6 @@ const App: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      autoSaveCountRef.current++;
       link.download = `OSM_Trace_${Date.now()}.trc`;
       link.click();
       URL.revokeObjectURL(url);
@@ -168,10 +165,6 @@ const App: React.FC = () => {
   };
 
   const connectESP32Serial = async () => {
-    if (!('serial' in navigator)) {
-      addDebugLog("Web Serial not supported in this browser.");
-      return;
-    }
     try {
       setBridgeStatus('connecting');
       const port = await (navigator as any).serial.requestPort();
@@ -193,20 +186,16 @@ const App: React.FC = () => {
         for (const line of lines) if (line.trim()) parseESP32Line(line);
       }
     } catch (err: any) { 
-      addDebugLog(`Serial Error: ${err.message}`);
+      addDebugLog(`Connection Error: ${err.message}`);
       setBridgeStatus('error'); 
       disconnectHardware(); 
     }
   };
 
   const connectESP32Bluetooth = async () => {
-    if (!(navigator as any).bluetooth) {
-      addDebugLog("Web Bluetooth not supported.");
-      return;
-    }
     try {
       setBridgeStatus('connecting');
-      addDebugLog("Searching for OSM device...");
+      addDebugLog("Attempting Bluetooth Request...");
       const device = await (navigator as any).bluetooth.requestDevice({
         filters: [{ namePrefix: 'OSM_CAN' }],
         optionalServices: [UART_SERVICE_UUID]
@@ -229,11 +218,11 @@ const App: React.FC = () => {
         for (const line of lines) if (line.trim()) parseESP32Line(line);
       });
       device.addEventListener('gattserverdisconnected', () => {
-        addDebugLog("BT Link Lost.");
+        addDebugLog("BT Link Terminated.");
         disconnectHardware();
       });
     } catch (err: any) {
-      addDebugLog(`BT Error: ${err.message}`);
+      addDebugLog(`BT Link Error: ${err.message}`);
       setBridgeStatus('error');
       disconnectHardware();
     }
@@ -248,9 +237,9 @@ const App: React.FC = () => {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-white px-6 text-center">
         <h1 className="text-6xl md:text-8xl font-orbitron font-black text-slate-900 uppercase leading-none">OSM <span className="text-indigo-600">LIVE</span></h1>
-        <p className="mt-4 text-[10px] font-orbitron font-bold text-slate-400 uppercase tracking-[0.5em]">Tactical Mobile Interface</p>
+        <p className="mt-4 text-[10px] font-orbitron font-bold text-slate-400 uppercase tracking-[0.5em]">Tactical Interface</p>
         <button onClick={() => setView('live')} className="mt-16 w-full max-w-xs py-6 bg-indigo-600 text-white rounded-3xl font-orbitron font-black uppercase shadow-2xl hover:bg-indigo-700 active:scale-95 transition-all">
-          Launch HUD
+          Initialize HUD
         </button>
       </div>
     );
