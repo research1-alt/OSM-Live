@@ -4,7 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#4f46e5">
+    <link rel="manifest" href="/manifest.json">
     <title>OSM Live | Tactical HUD</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,11 +26,13 @@
             color: #0f172a;
             overflow: hidden;
             height: 100vh;
+            /* Prevents pull-to-refresh on mobile */
             overscroll-behavior-y: contain;
         }
         .font-orbitron { font-family: 'Orbitron', sans-serif; }
         .mono { font-family: 'JetBrains Mono', monospace; }
         
+        /* Tactical Grid Background (Light Mode) */
         .cyber-grid {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -54,6 +59,7 @@
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
+        /* Responsive adjustments for mobile */
         @media (max-width: 768px) {
             .glass-panel {
                 backdrop-filter: blur(10px);
@@ -69,6 +75,7 @@
             to { opacity: 1; transform: scale(1) translateY(0); }
         }
 
+        /* Custom Scrollbar */
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb {
@@ -98,5 +105,16 @@
     <div class="cyber-grid"></div>
     <div id="root"></div>
 <script type="module" src="/index.tsx"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').then(reg => {
+        console.log('SW Registered:', reg.scope);
+      }).catch(err => {
+        console.log('SW Registration failed:', err);
+      });
+    });
+  }
+</script>
 </body>
 </html>
