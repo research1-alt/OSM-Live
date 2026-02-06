@@ -34,6 +34,8 @@ export const MY_CUSTOM_DBC: DBCDatabase = {
       "DTE": { name: "Distance_To_Empty_DTE", startBit: 8, length: 8, isLittleEndian: true, isSigned: false, scale: 4, offset: 0, min: 0, max: 1000, unit: "km" },
       "TTC": { name: "Time_To_Charge", startBit: 16, length: 8, isLittleEndian: true, isSigned: false, scale: 3, offset: 0, min: 0, max: 765, unit: "Minute" },
       "Temp": { name: "Battery_Temperature", startBit: 24, length: 8, isLittleEndian: true, isSigned: true, scale: 1, offset: 0, min: -128, max: 127, unit: "C" },
+      "Key_On": { name: "Key_On_Indicator", startBit: 34, length: 2, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 3, unit: "" },
+      "Fault_Light": { name: "Battery_Fault_Light", startBit: 36, length: 2, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 3, unit: "" },
       "Total_kWh": { name: "Total_Battery_Capacity_kWh", startBit: 56, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 250, unit: "kWh" },
       "Total_Ah": { name: "Total_Battery_Capacity_Ah", startBit: 48, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 510, unit: "Ah" },
       "DOD": { name: "Battery_DOD", startBit: 40, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 100, unit: "%" },
@@ -44,10 +46,23 @@ export const MY_CUSTOM_DBC: DBCDatabase = {
     name: "LV_ID_0x14234050_Drive_Limit",
     dlc: 8,
     signals: {
-      "Current": { name: "Battery_Drive_Current_Live", startBit: 0, length: 16, isLittleEndian: true, isSigned: true, scale: 0.1, offset: 0, min: -3000, max: 3000, unit: "Amp" },
-      "Limit": { name: "Battery_Drive_Current_Limit", startBit: 16, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 250, unit: "Amp" },
-      "Regen": { name: "Battery_Regen_Current_Limit", startBit: 24, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 255, unit: "Amp" },
-      "Mode": { name: "Battery_Vehicle_Mode", startBit: 32, length: 3, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 7, unit: "" }
+      "Drive_Current_Live": { name: "Battery_Drive_Current_Live", startBit: 0, length: 16, isLittleEndian: true, isSigned: true, scale: 0.1, offset: 0, min: -3000, max: 3000, unit: "Amp" },
+      "Drive_Current_Limit": { name: "Battery_Drive_Current_Limit", startBit: 16, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 250, unit: "Amp" },
+      "Regen_Current_Limit": { name: "Battery_Regen_Current_Limit", startBit: 24, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 255, unit: "Amp" },
+      "Vehicle_Mode": { name: "Battery_Vehicle_Mode", startBit: 32, length: 3, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 7, unit: "" },
+      "MaxCurrent_Safety": { name: "Battery_MaxCurrent_Safety_Limit", startBit: 40, length: 8, isLittleEndian: true, isSigned: false, scale: 2, offset: 0, min: 0, max: 511, unit: "Amp" },
+      "MaxRegen_Safety": { name: "Battery_MaxRegen_Current_Safety", startBit: 48, length: 8, isLittleEndian: true, isSigned: false, scale: 2, offset: 0, min: 0, max: 511, unit: "Amp" }
+    }
+  },
+  "2566849376": { // 0x18FF0360
+    name: "LV_ID_0x18FF0360_Battery_Info",
+    dlc: 8,
+    signals: {
+      "Charging_Cycle": { name: "Battery_Charging_Cycle", startBit: 40, length: 16, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 50000, unit: "Nos" },
+      "SOH": { name: "Battery_State_of_Health_SOH", startBit: 23, length: 16, isLittleEndian: false, isSigned: false, scale: 0.01, offset: 0, min: 0, max: 100, unit: "%" },
+      "Pre_Charge_Time": { name: "Battery_Pre_Charge_Time", startBit: 0, length: 9, isLittleEndian: false, isSigned: false, scale: 5, offset: 0, min: 0, max: 2500, unit: "ms" },
+      "Pre_Charge_Complete": { name: "Battery_Pre_Charge_Complete", startBit: 1, length: 1, isLittleEndian: false, isSigned: false, scale: 1, offset: 0, min: 0, max: 1, unit: "" },
+      "Drive_State": { name: "Battery_Drive_State", startBit: 56, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 255, unit: "" }
     }
   },
   "2486108048": { // 0x142EFF90
@@ -55,9 +70,24 @@ export const MY_CUSTOM_DBC: DBCDatabase = {
     dlc: 8,
     signals: {
       "Current": { name: "Battery_Live_Current", startBit: 0, length: 16, isLittleEndian: true, isSigned: true, scale: 0.1, offset: 0, min: 0, max: 3200, unit: "Amp" },
-      "Ah": { name: "Battery_Capacity_Left_Ah", startBit: 16, length: 16, isLittleEndian: true, isSigned: false, scale: 0.01, offset: 0, min: 0, max: 320, unit: "Ah" },
-      "kWh": { name: "Battery_Capacity_Left_kWh", startBit: 32, length: 16, isLittleEndian: true, isSigned: false, scale: 0.01, offset: 0, min: 0, max: 327, unit: "kWh" },
-      "Volt": { name: "Battery_Live_Voltage", startBit: 48, length: 16, isLittleEndian: true, isSigned: false, scale: 0.01, offset: 0, min: 0, max: 654, unit: "V" }
+      "Ah_Left": { name: "Battery_Capacity_Left_Ah", startBit: 16, length: 16, isLittleEndian: true, isSigned: false, scale: 0.01, offset: 0, min: 0, max: 320, unit: "Ah" },
+      "kWh_Left": { name: "Battery_Capacity_Left_kWh", startBit: 32, length: 16, isLittleEndian: true, isSigned: false, scale: 0.01, offset: 0, min: 0, max: 327, unit: "kWh" },
+      "Voltage": { name: "Battery_Live_Voltage", startBit: 48, length: 16, isLittleEndian: true, isSigned: false, scale: 0.01, offset: 0, min: 0, max: 654, unit: "V" }
+    }
+  },
+  "2552692609": { // 0x1826FF81
+    name: "LV_ID_0x1826FF81_MCU_VCU_Input",
+    dlc: 8,
+    signals: {
+      "Speed": { name: "Vehicle_Speed", startBit: 48, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 255, unit: "km/h" },
+      "Drive_Modes": { name: "Vehicle_Drive_Modes", startBit: 56, length: 3, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 7, unit: "" },
+      "Brake_Perc": { name: "Vehicle_Brake_Percentage", startBit: 40, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 100, unit: "%" },
+      "Throttle_Perc": { name: "Vehicle_Throttle_Percntage", startBit: 32, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 100, unit: "%" },
+      "Regen_Flag": { name: "MCU_Regen_Flag", startBit: 59, length: 1, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 1, unit: "" },
+      "Hill_Hold": { name: "Hill_Hold", startBit: 60, length: 1, isLittleEndian: true, isSigned: false, scale: 1, offset: 0, min: 0, max: 1, unit: "" },
+      "MCU_Temp": { name: "MCU_Temperature", startBit: 0, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: -50, min: -50, max: 205, unit: "DegC" },
+      "Motor_Temp": { name: "Motor_Temperature", startBit: 8, length: 8, isLittleEndian: true, isSigned: false, scale: 1, offset: -50, min: -50, max: 205, unit: "DegC" },
+      "RMS_Current": { name: "MOTOR_RMS_Current", startBit: 16, length: 16, isLittleEndian: true, isSigned: false, scale: 0.1, offset: 0, min: 0, max: 510, unit: "A" }
     }
   },
   "2460002948": { // 0x12A0AA84 - CHG ERROR
@@ -89,26 +119,6 @@ export const MY_CUSTOM_DBC: DBCDatabase = {
       "ChargingMode": { name: "ChargerChargingModeStatus", startBit: 33, length: 2, isLittleEndian: false, isSigned: false, scale: 1, offset: 0, min: 0, max: 3, unit: "" }
     }
   },
-  "2460057770": { // 0x12A180AA
-    name: "LV_ID_0x12A180AA_BMS_MAX_LIMITS_HSK",
-    dlc: 8,
-    signals: {
-      "Hand_Shaking": { name: "Batt_Charger_Hand_Shaking", startBit: 7, length: 8, isLittleEndian: false, isSigned: false, scale: 1, offset: 0, min: 0, max: 1, unit: "" },
-      "Current_MAXLIMIT": { name: "Charging_Current_MAXLIMIT", startBit: 31, length: 16, isLittleEndian: false, isSigned: false, scale: 0.01, offset: 0, min: 0, max: 163, unit: "A" },
-      "Voltage_MAXLIMIT": { name: "Charging_Voltage_MAXLIMIT", startBit: 15, length: 16, isLittleEndian: false, isSigned: false, scale: 0.1, offset: 0, min: 0, max: 1310, unit: "V" },
-      "Emergency_Shutdown": { name: "Emergency_Shutdown", startBit: 40, length: 1, isLittleEndian: false, isSigned: false, scale: 1, offset: 0, min: 0, max: 1, unit: "" }
-    }
-  },
-  "2460057771": { // 0x12A180AB
-    name: "LV_ID_0x12A180AB_BMS_LIVE_REQ",
-    dlc: 8,
-    signals: {
-      "RequestVoltage": { name: "ChargingRequestVoltage", startBit: 23, length: 16, isLittleEndian: false, isSigned: false, scale: 0.1, offset: 0, min: 0, max: 6553, unit: "V" },
-      "RequestCurrent": { name: "ChargingRequestCurrent", startBit: 7, length: 16, isLittleEndian: false, isSigned: false, scale: 0.01, offset: 0, min: 0, max: 655, unit: "A" },
-      "On_Off": { name: "Charging_On_Off", startBit: 34, length: 2, isLittleEndian: false, isSigned: false, scale: 1, offset: 0, min: 0, max: 2, unit: "" },
-      "Activation": { name: "Charging_Activation", startBit: 32, length: 1, isLittleEndian: false, isSigned: false, scale: 1, offset: 0, min: 0, max: 1, unit: "" }
-    }
-  },
   "2552647744": { // 0x18265040
     name: "LV_ID_0x18265040_MCU_Motor_Temp",
     dlc: 8,
@@ -137,16 +147,6 @@ export const MY_CUSTOM_DBC: DBCDatabase = {
       "P3": { name: "TPMS_Tire_Pressure_3", startBit: 23, length: 8, isLittleEndian: false, isSigned: false, scale: 1, offset: 0, min: 0, max: 255, unit: "psi" },
       "P4": { name: "TPMS_Tire_Pressure_4", startBit: 31, length: 8, isLittleEndian: false, isSigned: false, scale: 1, offset: 0, min: 0, max: 255, unit: "psi" }
     }
-  },
-  "2471537153": { 
-    name: "LV_ID_0x1350AA01_Cell_1_4_Volt", 
-    dlc: 8, 
-    signals: { 
-      "C1": { name: "Battery_Cell_Volt_1", startBit: 0, length: 16, isLittleEndian: true, isSigned: false, scale: 0.0001, offset: 0, min: 0, max: 6, unit: "V" }, 
-      "C2": { name: "Battery_Cell_Volt_2", startBit: 16, length: 16, isLittleEndian: true, isSigned: false, scale: 0.0001, offset: 0, min: 0, max: 6, unit: "V" }, 
-      "C3": { name: "Battery_Cell_Volt_3", startBit: 32, length: 16, isLittleEndian: true, isSigned: false, scale: 0.0001, offset: 0, min: 0, max: 6, unit: "V" }, 
-      "C4": { name: "Battery_Cell_Volt_4", startBit: 48, length: 16, isLittleEndian: true, isSigned: false, scale: 0.0001, offset: 0, min: 0, max: 6, unit: "V" } 
-    } 
   }
 };
 
