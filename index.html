@@ -3,12 +3,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#4f46e5">
-    <link rel="manifest" href="/manifest.json">
-    <title>OSM Live | Tactical HUD</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSM Tactical PCAN HUD</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,7 +22,6 @@
             color: #0f172a;
             overflow: hidden;
             height: 100vh;
-            overscroll-behavior-y: contain;
         }
         .font-orbitron { font-family: 'Orbitron', sans-serif; }
         .mono { font-family: 'JetBrains Mono', monospace; }
@@ -55,13 +50,6 @@
             border: 1px solid rgba(79, 70, 229, 0.15);
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.05);
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        @media (max-width: 768px) {
-            .glass-panel {
-                backdrop-filter: blur(10px);
-                border-radius: 24px !important;
-            }
         }
 
         .animate-frame {
@@ -101,16 +89,5 @@
     <div class="cyber-grid"></div>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').then(reg => {
-            console.log('SW Registered:', reg.scope);
-          }).catch(err => {
-            console.log('SW Registration failed:', err);
-          });
-        });
-      }
-    </script>
 </body>
 </html>
