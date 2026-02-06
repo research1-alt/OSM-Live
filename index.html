@@ -1,8 +1,13 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#4f46e5">
+    <link rel="manifest" href="/manifest.json">
     <title>OSM Live | Tactical HUD</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,6 +26,8 @@
             color: #0f172a;
             overflow: hidden;
             height: 100vh;
+            /* Prevents pull-to-refresh on mobile */
+            overscroll-behavior-y: contain;
         }
         .font-orbitron { font-family: 'Orbitron', sans-serif; }
         .mono { font-family: 'JetBrains Mono', monospace; }
@@ -44,7 +51,6 @@
             to { background-position: 0 500px; }
         }
 
-        /* Glassmorphism Light Mode */
         .glass-panel {
             background: rgba(255, 255, 255, 0.85);
             backdrop-filter: blur(20px) saturate(180%);
@@ -52,41 +58,30 @@
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.05);
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        .glass-panel:hover {
-            border-color: rgba(79, 70, 229, 0.3);
-            box-shadow: 0 12px 48px 0 rgba(79, 70, 229, 0.1);
+
+        /* Responsive adjustments for mobile */
+        @media (max-width: 768px) {
+            .glass-panel {
+                backdrop-filter: blur(10px);
+                border-radius: 24px !important;
+            }
         }
 
-        /* Neon Text Glow (Adjusted for Light BG) */
-        .glow-text-indigo { text-shadow: 0 0 12px rgba(79, 70, 229, 0.3); }
-        .glow-text-emerald { text-shadow: 0 0 12px rgba(5, 150, 105, 0.3); }
-        .glow-text-red { text-shadow: 0 0 12px rgba(220, 38, 38, 0.3); }
-
-        /* Row Entrance Animation */
+        .animate-frame {
+            animation: slideInRow 0.15s ease-out forwards;
+        }
         @keyframes slideInRow {
             from { opacity: 0; transform: scale(0.98) translateY(5px); }
             to { opacity: 1; transform: scale(1) translateY(0); }
         }
-        .animate-frame {
-            animation: slideInRow 0.15s ease-out forwards;
-        }
-
-        @keyframes pulse-slow {
-            0%, 100% { border-color: rgba(220, 38, 38, 0.2); box-shadow: 0 0 15px rgba(220, 38, 38, 0.05); }
-            50% { border-color: rgba(220, 38, 38, 0.4); box-shadow: 0 0 25px rgba(220, 38, 38, 0.1); }
-        }
-        .animate-pulse-slow {
-            animation: pulse-slow 2s infinite ease-in-out;
-        }
 
         /* Custom Scrollbar */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.03); }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb {
-            background: rgba(79, 70, 229, 0.2);
+            background: rgba(79, 70, 229, 0.1);
             border-radius: 10px;
         }
-        ::-webkit-scrollbar-thumb:hover { background: var(--neon-indigo); }
     </style>
 <script type="importmap">
 {
