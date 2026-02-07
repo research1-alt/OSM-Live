@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Link as LinkIcon, Cpu, Terminal, Loader2, Info, Activity, AlertCircle, Cable, Bluetooth, ShieldCheck, ShieldAlert, Smartphone, Globe } from 'lucide-react';
+import { Zap, Link as LinkIcon, Cpu, Terminal, Loader2, Info, Activity, AlertCircle, Cable, Bluetooth, ShieldCheck, ShieldAlert, Smartphone, Globe, Search } from 'lucide-react';
 import { ConnectionStatus, HardwareStatus } from '../types.ts';
 
 interface ConnectionPanelProps {
@@ -33,14 +33,16 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
     setIsNative(isNativeApp);
   }, []);
 
+  const isScanning = status === 'connecting' && hardwareMode === 'esp32-bt';
+
   return (
     <div className="flex flex-col gap-4 w-full max-w-5xl mx-auto pt-2 pb-10 overflow-y-auto px-4">
       <div className={`p-4 rounded-3xl flex items-center gap-4 shadow-sm ${isNative ? 'bg-emerald-50 border border-emerald-100' : 'bg-indigo-50 border border-indigo-100'}`}>
            <div className="bg-white p-2 rounded-xl shadow-sm">{isNative ? <Smartphone size={20} className="text-emerald-600"/> : <AlertCircle size={20} className="text-indigo-600"/>}</div>
            <div className="flex-1">
-              <h4 className="text-[11px] font-orbitron font-black uppercase tracking-widest">{isNative ? 'Native Link Active' : 'Web Link Active'}</h4>
-              <p className="text-[10px] text-slate-600 font-medium">
-                {isNative ? 'Bluetooth Link is now powered by Native Android GATT Bridge.' : 'Direct Bluetooth is restricted. Use PCAN WebSocket bridge.'}
+              <h4 className="text-[11px] font-orbitron font-black uppercase tracking-widest">{isNative ? 'Native Bridge Ready' : 'Web Environment'}</h4>
+              <p className="text-[10px] text-slate-600 font-medium leading-tight">
+                {isNative ? 'Using Native Android GATT Bridge. Ensure GPS/Location is ON for device discovery.' : 'Direct Bluetooth is restricted in browser. Use PCAN Bridge.'}
               </p>
            </div>
       </div>
@@ -63,10 +65,18 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
 
             {hardwareMode === 'esp32-bt' && (
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col gap-3">
-                 <div className="flex items-center justify-between text-[9px] font-orbitron font-black uppercase"><span className="text-slate-400">BT Readiness Check</span><Bluetooth size={12} className="text-indigo-400"/></div>
+                 <div className="flex items-center justify-between text-[9px] font-orbitron font-black uppercase"><span className="text-slate-400">BLE Discovery Status</span><Bluetooth size={12} className="text-indigo-400"/></div>
                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between text-[10px] font-bold"><span className="text-slate-500">Native Bridge</span><ShieldCheck size={14} className="text-emerald-500"/></div>
-                    <div className="flex items-center justify-between text-[10px] font-bold"><span className="text-slate-500">Android Permissions</span><ShieldCheck size={14} className="text-emerald-500"/></div>
+                    <div className="flex items-center justify-between text-[10px] font-bold">
+                        <span className="text-slate-500">Android Scan Permissions</span>
+                        <ShieldCheck size={14} className="text-emerald-500"/>
+                    </div>
+                    {isScanning && (
+                      <div className="flex items-center gap-3 p-3 bg-white border border-indigo-100 rounded-xl animate-pulse">
+                         <Loader2 size={14} className="animate-spin text-indigo-600" />
+                         <span className="text-[9px] font-orbitron font-black text-indigo-600 uppercase">Searching for OSM_CAN...</span>
+                      </div>
+                    )}
                  </div>
               </div>
             )}
@@ -79,16 +89,26 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
             )}
           </div>
 
-          <button onClick={() => status === 'connected' ? onDisconnect() : onConnect()} disabled={status === 'connecting'} className={`w-full py-6 mt-6 rounded-3xl text-[11px] font-orbitron font-black uppercase tracking-[0.4em] shadow-xl transition-all ${status === 'connected' ? 'bg-red-50 text-red-600' : 'bg-indigo-600 text-white'}`}>
-             {status === 'connecting' ? <Loader2 className="animate-spin mx-auto" size={18}/> : status === 'connected' ? 'TERMINATE_LINK' : 'ESTABLISH_LINK'}
-          </button>
+          <div className="flex flex-col gap-3 mt-6">
+            <button 
+              onClick={() => status === 'connected' ? onDisconnect() : onConnect()} 
+              disabled={status === 'connecting'} 
+              className={`w-full py-6 rounded-3xl text-[11px] font-orbitron font-black uppercase tracking-[0.4em] shadow-xl transition-all flex items-center justify-center gap-3 ${status === 'connected' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-indigo-600 text-white'}`}
+            >
+               {status === 'connecting' ? <Loader2 className="animate-spin" size={18}/> : status === 'connected' ? 'TERMINATE_LINK' : 'ESTABLISH_LINK'}
+               {!status.includes('connect') && <Zap size={16} />}
+            </button>
+            {isScanning && (
+               <p className="text-[8px] text-center text-slate-400 font-bold uppercase tracking-widest animate-pulse">Scanning for "OSM_CAN_BT" signals...</p>
+            )}
+          </div>
         </div>
 
         <div className="glass-panel border border-slate-200 bg-slate-50 rounded-[40px] p-6 lg:p-8 flex flex-col min-h-[400px] shadow-inner">
           <div className="flex items-center gap-3 mb-4"><Terminal size={18} className="text-slate-500"/><span className="text-[12px] font-orbitron font-black uppercase">Link_Console</span></div>
           <div className="flex-1 bg-slate-900 rounded-3xl p-6 font-mono text-[11px] text-emerald-500/80 overflow-y-auto flex flex-col-reverse shadow-2xl">
              {debugLog.map((log, i) => <div key={i} className="py-1 border-b border-slate-800/30 break-all">{log}</div>)}
-             {debugLog.length === 0 && <div className="h-full flex items-center justify-center text-slate-700 uppercase tracking-widest opacity-40">Awaiting link initiation</div>}
+             {debugLog.length === 0 && <div className="h-full flex items-center justify-center text-slate-700 uppercase tracking-widest opacity-40 text-center">Awaiting native bridge <br/> initialization...</div>}
           </div>
         </div>
       </div>
