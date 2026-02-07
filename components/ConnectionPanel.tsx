@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { Zap, Link as LinkIcon, Cpu, Terminal, Loader2, Info, Activity, AlertCircle, Cable, Settings2, Bluetooth, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Zap, Link as LinkIcon, Cpu, Terminal, Loader2, Info, Activity, AlertCircle, Cable, Settings2, Bluetooth, ShieldCheck, ShieldAlert, Smartphone } from 'lucide-react';
 import { ConnectionStatus, HardwareStatus } from '../types.ts';
 import ESP32SetupGuide from './ESP32SetupGuide.tsx';
 
@@ -30,25 +29,51 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   const [showSetup, setShowSetup] = useState(false);
   const [btSupported, setBtSupported] = useState<boolean | null>(null);
   const [isHttps, setIsHttps] = useState(true);
+  const [isNative, setIsNative] = useState(false);
 
   useEffect(() => {
+    // Check if running inside the Android Native App via JavascriptInterface
+    const isNativeApp = (window as any).AndroidInterface?.isNativeApp?.() || false;
+    setIsNative(isNativeApp);
+    
+    // Web Bluetooth check
     setBtSupported(!!(navigator as any).bluetooth);
-    setIsHttps(window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    
+    // Protocol check - Bypass for Native Apps which might run on file:// or custom schemes
+    const protocolValid = window.location.protocol === 'https:' || 
+                         window.location.hostname === 'localhost' || 
+                         window.location.hostname === '127.0.0.1' ||
+                         isNativeApp; // Native app is trusted environment
+    setIsHttps(protocolValid);
   }, []);
 
   return (
-    <div className="flex flex-col gap-4 w-full max-w-5xl mx-auto pt-2 animate-in fade-in pb-10 overflow-y-auto max-h-full custom-scrollbar">
+    <div className="flex flex-col gap-4 w-full max-w-5xl mx-auto pt-2 animate-in fade-in pb-10 overflow-y-auto max-h-full custom-scrollbar px-4">
       {showSetup && <ESP32SetupGuide baudRate={baudRate} onClose={() => setShowSetup(false)} />}
       
-      <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-3xl flex items-center gap-4 shadow-sm">
-         <div className="bg-white p-2 rounded-xl text-indigo-600 shadow-sm">
-            <AlertCircle size={20} />
-         </div>
-         <div className="flex-1">
-            <h4 className="text-[11px] font-orbitron font-black text-indigo-900 uppercase tracking-widest">Hardware Interfacing</h4>
-            <p className="text-[10px] text-indigo-600 font-medium leading-relaxed">Choose between high-speed <span className="font-bold">PCAN WebSocket</span>, wired <span className="font-bold">ESP32 Serial</span>, or wireless <span className="font-bold">ESP32 Bluetooth</span>.</p>
-         </div>
-      </div>
+      {isNative ? (
+        <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-3xl flex items-center gap-4 shadow-sm animate-in slide-in-from-top-4">
+           <div className="bg-white p-2 rounded-xl text-emerald-600 shadow-sm">
+              <Smartphone size={20} />
+           </div>
+           <div className="flex-1">
+              <h4 className="text-[11px] font-orbitron font-black text-emerald-900 uppercase tracking-widest">Mobile Native Link Active</h4>
+              <p className="text-[10px] text-emerald-600 font-medium leading-relaxed">
+                App environment detected. Use <span className="font-bold">PCAN WebSocket</span> for wireless link via local gateway.
+              </p>
+           </div>
+        </div>
+      ) : (
+        <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-3xl flex items-center gap-4 shadow-sm">
+           <div className="bg-white p-2 rounded-xl text-indigo-600 shadow-sm">
+              <AlertCircle size={20} />
+           </div>
+           <div className="flex-1">
+              <h4 className="text-[11px] font-orbitron font-black text-indigo-900 uppercase tracking-widest">Hardware Interfacing</h4>
+              <p className="text-[10px] text-indigo-600 font-medium leading-relaxed">Choose between high-speed <span className="font-bold">PCAN WebSocket</span>, wired <span className="font-bold">ESP32 Serial</span>, or wireless <span className="font-bold">ESP32 Bluetooth</span>.</p>
+           </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="glass-panel border border-slate-200 bg-white rounded-[40px] p-6 lg:p-10 shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[550px]">
@@ -114,7 +139,16 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                         {isHttps ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-red-500" />}
                     </div>
                  </div>
-                 {!isHttps && <p className="text-[8px] text-red-500 font-bold uppercase leading-tight">* Web Bluetooth requires an HTTPS connection or Localhost.</p>}
+                 {!btSupported && !isNative && (
+                   <p className="text-[8px] text-amber-600 font-bold uppercase leading-tight bg-amber-50 p-2 rounded-lg">
+                     * Web Bluetooth is not supported in this browser. Use Chrome or the PCAN WebSocket bridge.
+                   </p>
+                 )}
+                 {isNative && !btSupported && (
+                   <p className="text-[8px] text-indigo-600 font-bold uppercase leading-tight bg-indigo-50 p-2 rounded-lg">
+                     * BLE via WebView is restricted. Please use the "PCAN" WebSocket mode for mobile data link.
+                   </p>
+                 )}
               </div>
             )}
 
@@ -152,7 +186,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
           <div className="space-y-6">
             <button 
               onClick={() => status === 'connected' ? onDisconnect() : onConnect()}
-              disabled={status === 'connecting' || (hardwareMode === 'esp32-bt' && (!btSupported || !isHttps))}
+              disabled={status === 'connecting' || (hardwareMode === 'esp32-bt' && !isNative && (!btSupported || !isHttps))}
               className={`w-full py-6 rounded-3xl text-[11px] font-orbitron font-black uppercase tracking-[0.4em] transition-all flex items-center justify-center gap-4 shadow-xl active:scale-95 ${
                 status === 'connected' ? 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/20'
               } disabled:opacity-50 disabled:cursor-not-allowed`}
