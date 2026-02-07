@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { Zap, Link as LinkIcon, Cpu, Terminal, Loader2, Info, Activity, AlertCircle, Cable, Settings2, Bluetooth, ShieldCheck, ShieldAlert, Smartphone } from 'lucide-react';
+import { Zap, Link as LinkIcon, Cpu, Terminal, Loader2, Info, Activity, AlertCircle, Cable, Settings2, Bluetooth, ShieldCheck, ShieldAlert, Smartphone, Globe } from 'lucide-react';
 import { ConnectionStatus, HardwareStatus } from '../types.ts';
 import ESP32SetupGuide from './ESP32SetupGuide.tsx';
 
@@ -7,6 +8,8 @@ interface ConnectionPanelProps {
   status: ConnectionStatus;
   hwStatus?: HardwareStatus;
   hardwareMode: 'pcan' | 'esp32-serial' | 'esp32-bt';
+  pcanAddress?: string;
+  setPcanAddress?: (addr: string) => void;
   onSetHardwareMode: (mode: 'pcan' | 'esp32-serial' | 'esp32-bt') => void;
   baudRate: number;
   setBaudRate: (rate: number) => void;
@@ -19,6 +22,8 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   status, 
   hwStatus = 'offline', 
   hardwareMode,
+  pcanAddress,
+  setPcanAddress,
   onSetHardwareMode,
   baudRate,
   setBaudRate,
@@ -39,13 +44,21 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
     // Web Bluetooth check
     setBtSupported(!!(navigator as any).bluetooth);
     
-    // Protocol check - Bypass for Native Apps which might run on file:// or custom schemes
+    // Protocol check
     const protocolValid = window.location.protocol === 'https:' || 
                          window.location.hostname === 'localhost' || 
                          window.location.hostname === '127.0.0.1' ||
-                         isNativeApp; // Native app is trusted environment
+                         isNativeApp; 
     setIsHttps(protocolValid);
-  }, []);
+
+    // Default to PCAN if native since others are restricted
+    if (isNativeApp && hardwareMode !== 'pcan') {
+      onSetHardwareMode('pcan');
+    }
+  }, [isNative, onSetHardwareMode]);
+
+  const isBluetoothBlocked = hardwareMode === 'esp32-bt' && !isNative && (!btSupported || !isHttps);
+  const showPcanSupport = hardwareMode === 'pcan';
 
   return (
     <div className="flex flex-col gap-4 w-full max-w-5xl mx-auto pt-2 animate-in fade-in pb-10 overflow-y-auto max-h-full custom-scrollbar px-4">
@@ -100,30 +113,57 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                   hardwareMode === 'pcan' ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'
                 }`}
               >
-                <Activity size={20} />
+                <Globe size={20} />
                 <span className="text-[8px] font-orbitron font-black uppercase">PCAN</span>
               </button>
               <button 
                 onClick={() => onSetHardwareMode('esp32-serial')}
+                disabled={isNative}
                 className={`flex flex-col items-center gap-3 p-4 rounded-3xl border transition-all ${
                   hardwareMode === 'esp32-serial' ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'
-                }`}
+                } ${isNative ? 'opacity-30 cursor-not-allowed' : ''}`}
               >
                 <Cable size={20} />
                 <span className="text-[8px] font-orbitron font-black uppercase">Wired</span>
               </button>
               <button 
                 onClick={() => onSetHardwareMode('esp32-bt')}
+                disabled={isNative}
                 className={`flex flex-col items-center gap-3 p-4 rounded-3xl border transition-all ${
                   hardwareMode === 'esp32-bt' ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'
-                }`}
+                } ${isNative ? 'opacity-30 cursor-not-allowed' : ''}`}
               >
                 <Bluetooth size={20} />
                 <span className="text-[8px] font-orbitron font-black uppercase">BLE</span>
               </button>
             </div>
 
-            {hardwareMode === 'esp32-bt' && (
+            {hardwareMode === 'pcan' && (
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
+                 <div className="flex items-center justify-between text-[9px] font-orbitron font-black uppercase tracking-widest">
+                    <span className="text-slate-400">PCAN Bridge Settings</span>
+                    <Globe size={12} className="text-indigo-400" />
+                 </div>
+                 <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] font-bold text-slate-400">BRIDGE_ADDRESS</label>
+                      <input 
+                        type="text" 
+                        value={pcanAddress}
+                        onChange={(e) => setPcanAddress?.(e.target.value)}
+                        placeholder="192.168.x.x:8080"
+                        className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-[11px] font-mono text-slate-800 shadow-sm focus:border-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] font-bold">
+                        <span className="text-slate-500">Network Readiness</span>
+                        <ShieldCheck size={14} className="text-emerald-500" />
+                    </div>
+                 </div>
+              </div>
+            )}
+
+            {hardwareMode === 'esp32-bt' && !isNative && (
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
                  <div className="flex items-center justify-between text-[9px] font-orbitron font-black uppercase tracking-widest">
                     <span className="text-slate-400">BT Readiness Check</span>
@@ -139,61 +179,29 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                         {isHttps ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-red-500" />}
                     </div>
                  </div>
-                 {!btSupported && !isNative && (
-                   <p className="text-[8px] text-amber-600 font-bold uppercase leading-tight bg-amber-50 p-2 rounded-lg">
-                     * Web Bluetooth is not supported in this browser. Use Chrome or the PCAN WebSocket bridge.
-                   </p>
-                 )}
-                 {isNative && !btSupported && (
-                   <p className="text-[8px] text-indigo-600 font-bold uppercase leading-tight bg-indigo-50 p-2 rounded-lg">
-                     * BLE via WebView is restricted. Please use the "PCAN" WebSocket mode for mobile data link.
-                   </p>
-                 )}
               </div>
             )}
 
-            {hardwareMode === 'esp32-serial' && (
-              <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
-                <label className="text-[10px] font-orbitron font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                  <Settings2 size={12} /> Baud Rate Configuration
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[115200, 500000, 921600].map(rate => (
-                    <button 
-                      key={rate} 
-                      onClick={() => setBaudRate(rate)}
-                      className={`py-2.5 rounded-xl border font-mono text-[10px] font-bold transition-all ${
-                        baudRate === rate ? 'bg-indigo-600 border-indigo-500 text-white shadow-md' : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-slate-300'
-                      }`}
-                    >
-                      {rate.toLocaleString()}
-                    </button>
-                  ))}
-                </div>
+            {isNative && (hardwareMode === 'esp32-bt' || hardwareMode === 'esp32-serial') && (
+              <div className="bg-red-50 border border-red-100 p-4 rounded-2xl animate-pulse">
+                <p className="text-[9px] text-red-600 font-bold uppercase text-center">
+                  * Hardware Link restricted in Mobile WebView. <br/> Switch to PCAN WebSocket mode.
+                </p>
               </div>
-            )}
-
-            {(hardwareMode === 'esp32-serial' || hardwareMode === 'esp32-bt') && (
-              <button 
-                onClick={() => setShowSetup(true)}
-                className="mt-2 text-[9px] font-orbitron font-black text-indigo-600 uppercase tracking-widest text-left hover:underline flex items-center gap-2"
-              >
-                <Info size={12} /> View Bridge Firmware Guide →
-              </button>
             )}
           </div>
           
           <div className="space-y-6">
             <button 
               onClick={() => status === 'connected' ? onDisconnect() : onConnect()}
-              disabled={status === 'connecting' || (hardwareMode === 'esp32-bt' && !isNative && (!btSupported || !isHttps))}
+              disabled={status === 'connecting' || isBluetoothBlocked || (isNative && hardwareMode !== 'pcan')}
               className={`w-full py-6 rounded-3xl text-[11px] font-orbitron font-black uppercase tracking-[0.4em] transition-all flex items-center justify-center gap-4 shadow-xl active:scale-95 ${
                 status === 'connected' ? 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/20'
               } disabled:opacity-50 disabled:cursor-not-allowed`}
             >
               {status === 'connecting' ? <Loader2 className="animate-spin" size={18} /> : null}
               {status === 'connected' ? 'TERMINATE_LINK' : 'ESTABLISH_LINK'}
-              {hardwareMode === 'esp32-bt' ? <Bluetooth size={18} /> : <Zap size={18} fill={status === 'connected' ? 'none' : 'currentColor'} />}
+              {hardwareMode === 'esp32-bt' ? <Bluetooth size={18} /> : hardwareMode === 'pcan' ? <Globe size={18} /> : <Zap size={18} />}
             </button>
           </div>
         </div>

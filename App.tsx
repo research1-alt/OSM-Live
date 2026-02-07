@@ -22,13 +22,14 @@ const UART_TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('home');
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>('link');
-  const [hardwareMode, setHardwareMode] = useState<HardwareMode>('esp32-bt');
+  const [hardwareMode, setHardwareMode] = useState<HardwareMode>('pcan');
   const [frames, setFrames] = useState<CANFrame[]>([]);
   const [latestFrames, setLatestFrames] = useState<Record<string, CANFrame>>({});
   const [isPaused, setIsPaused] = useState(false);
   const [bridgeStatus, setBridgeStatus] = useState<ConnectionStatus>('disconnected');
   const [hwStatus, setHwStatus] = useState<HardwareStatus>('offline');
   const [baudRate, setBaudRate] = useState(115200);
+  const [pcanAddress, setPcanAddress] = useState('192.168.1.100:8080');
   const [rxByteCount, setRxByteCount] = useState(0);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -125,6 +126,10 @@ const App: React.FC = () => {
   }, []);
 
   const disconnectHardware = async () => {
+    if (socketRef.current) {
+      socketRef.current.close();
+      socketRef.current = null;
+    }
     if (btDeviceRef.current) {
       if (btDeviceRef.current.gatt.connected) btDeviceRef.current.gatt.disconnect();
       btDeviceRef.current = null;
@@ -137,6 +142,48 @@ const App: React.FC = () => {
     setHwStatus('offline');
     addDebugLog("Link Disconnected.");
   };
+
+  const connectPCANWebSocket = useCallback(() => {
+    try {
+      setBridgeStatus('connecting');
+      const url = pcanAddress.startsWith('ws') ? pcanAddress : `ws://${pcanAddress}`;
+      const socket = new WebSocket(url);
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        setBridgeStatus('connected');
+        addDebugLog(`PCAN Link Established: ${url}`);
+        sessionStartTimeRef.current = performance.now();
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const raw = JSON.parse(event.data);
+          // Expecting format: { id: "123", dlc: 8, data: ["AA", "BB"...] }
+          if (raw.id && raw.data) {
+            handleNewFrame(raw.id, raw.dlc || raw.data.length, raw.data);
+          }
+        } catch {
+          // Fallback to line-based parsing if not JSON
+          parseESP32Line(event.data);
+        }
+      };
+
+      socket.onerror = () => {
+        addDebugLog("PCAN WebSocket Error. Check Bridge IP.");
+        setBridgeStatus('error');
+      };
+
+      socket.onclose = () => {
+        if (bridgeStatus === 'connected') addDebugLog("PCAN Link Closed.");
+        setBridgeStatus('disconnected');
+      };
+
+    } catch (err: any) {
+      addDebugLog(`PCAN Init Error: ${err.message}`);
+      setBridgeStatus('error');
+    }
+  }, [pcanAddress, addDebugLog, handleNewFrame, parseESP32Line, bridgeStatus]);
 
   const connectESP32Serial = async () => {
     try {
@@ -199,9 +246,10 @@ const App: React.FC = () => {
   };
 
   const connectBridge = useCallback(() => {
-    if (hardwareMode === 'esp32-serial') connectESP32Serial();
+    if (hardwareMode === 'pcan') connectPCANWebSocket();
+    else if (hardwareMode === 'esp32-serial') connectESP32Serial();
     else if (hardwareMode === 'esp32-bt') connectESP32Bluetooth();
-  }, [hardwareMode, baudRate]);
+  }, [hardwareMode, baudRate, connectPCANWebSocket]);
 
   if (view === 'home') {
     return (
@@ -238,9 +286,17 @@ const App: React.FC = () => {
       <main className="flex-1 overflow-hidden relative">
         {dashboardTab === 'link' ? (
           <ConnectionPanel 
-            status={bridgeStatus} hwStatus={hwStatus} hardwareMode={hardwareMode}
-            onSetHardwareMode={setHardwareMode} baudRate={baudRate} setBaudRate={setBaudRate}
-            onConnect={connectBridge} onDisconnect={disconnectHardware} debugLog={debugLog}
+            status={bridgeStatus} 
+            hwStatus={hwStatus} 
+            hardwareMode={hardwareMode}
+            pcanAddress={pcanAddress}
+            setPcanAddress={setPcanAddress}
+            onSetHardwareMode={setHardwareMode} 
+            baudRate={baudRate} 
+            setBaudRate={setBaudRate}
+            onConnect={connectBridge} 
+            onDisconnect={disconnectHardware} 
+            debugLog={debugLog}
           />
         ) : dashboardTab === 'analysis' ? (
           <TraceAnalysisDashboard frames={frames} library={library} />
