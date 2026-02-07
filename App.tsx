@@ -8,7 +8,7 @@ import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary } from '@
 import { MY_CUSTOM_DBC, DEFAULT_LIBRARY_NAME } from '@/data/dbcProfiles';
 import { normalizeId, formatIdForDisplay } from '@/utils/decoder';
 
-const MAX_FRAME_LIMIT = 10000; 
+const MAX_FRAME_LIMIT = 1000000; 
 const BATCH_UPDATE_INTERVAL = 60; 
 
 const App: React.FC = () => {
