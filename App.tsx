@@ -8,7 +8,7 @@ import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary } from '@
 import { MY_CUSTOM_DBC, DEFAULT_LIBRARY_NAME } from '@/data/dbcProfiles';
 import { normalizeId, formatIdForDisplay } from '@/utils/decoder';
 
-const MAX_FRAME_LIMIT = 1000000; // Updated to 1,000,000 frames
+const MAX_FRAME_LIMIT = 10000; // Updated to 10,000 as requested
 const BATCH_UPDATE_INTERVAL = 60; 
 
 const App: React.FC = () => {
@@ -50,29 +50,23 @@ const App: React.FC = () => {
 
   const generateTraceFile = (framesToSave: CANFrame[]) => {
     const startTime = new Date().toISOString();
-    // Use an array to build the string for performance with 1,000,000 frames
-    const lines: string[] = [];
-    
-    lines.push(`$VERSION=1.1`);
-    lines.push(`$STARTTIME=${startTime}`);
-    lines.push(`;`);
-    lines.push(`;   Message   Time      Type ID              Rx/Tx`);
-    lines.push(`;   Number    Offset    |    [hex]           |  Data Length`);
-    lines.push(`;   |         [ms]      |    |               |  |  Data [hex] ...`);
-    lines.push(`;---+--  ---+----  ---+--  ---------+--  -+- +- +- -- -- -- -- -- -- -- --`);
+    let content = `$VERSION=1.1\n`;
+    content += `$STARTTIME=${startTime}\n`;
+    content += `;\n`;
+    content += `;   Message   Time      Type ID              Rx/Tx\n`;
+    content += `;   Number    Offset    |    [hex]           |  Data Length\n`;
+    content += `;   |         [ms]      |    |               |  |  Data [hex] ...\n`;
+    content += `;---+--  ---+----  ---+--  ---------+--  -+- +- +- -- -- -- -- -- -- -- --\n`;
 
-    // Process frames in the array for high performance
-    for (let i = 0; i < framesToSave.length; i++) {
-      const f = framesToSave[i];
+    framesToSave.forEach((f, i) => {
       const msgNum = (i + 1).toString().padStart(7, ' ');
       const timeStr = (f.timestamp / 1000).toFixed(6).padStart(12, ' ');
       const id = f.id.replace('0x', '').toUpperCase().padStart(12, ' ');
       const dlc = f.dlc.toString().padStart(2, ' ');
       const dataStr = f.data.join(' ');
-      lines.push(` ${msgNum}  ${timeStr}  DT  ${id}  Rx ${dlc} ${dataStr}`);
-    }
+      content += ` ${msgNum}  ${timeStr}  DT  ${id}  Rx ${dlc} ${dataStr}\n`;
+    });
 
-    const content = lines.join('\n');
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -133,7 +127,7 @@ const App: React.FC = () => {
           
           // ROLLOVER LOGIC: If buffer exceeds limit, save and reset
           if (combined.length >= MAX_FRAME_LIMIT) {
-            addDebugLog(`SYSTEM: Buffer limit hit (${MAX_FRAME_LIMIT.toLocaleString()}). Auto-exporting trace...`);
+            addDebugLog(`SYSTEM: Buffer limit hit (${MAX_FRAME_LIMIT}). Auto-exporting trace...`);
             generateTraceFile(combined);
             frameMapRef.current.clear(); // Reset uniqueness map for the new log
             return []; // Return empty array to start fresh
@@ -254,11 +248,8 @@ const App: React.FC = () => {
 
   const onManualSave = () => {
     setIsSaving(true);
-    // Use a small timeout to let the UI show the "Saving" state before the heavy work
-    setTimeout(() => {
-      generateTraceFile(frames);
-      setIsSaving(false);
-    }, 100);
+    generateTraceFile(frames);
+    setTimeout(() => setIsSaving(false), 1000);
   };
 
   if (view === 'home') {
