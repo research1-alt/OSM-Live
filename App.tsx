@@ -8,7 +8,7 @@ import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary } from '@
 import { MY_CUSTOM_DBC, DEFAULT_LIBRARY_NAME } from '@/data/dbcProfiles';
 import { normalizeId, formatIdForDisplay } from '@/utils/decoder';
 
-const MAX_FRAME_LIMIT = 3000;
+const MAX_FRAME_LIMIT = 1000000; // Updated to 1,000,000 frames
 const BATCH_UPDATE_INTERVAL = 60; 
 
 const App: React.FC = () => {
@@ -23,6 +23,7 @@ const App: React.FC = () => {
   const [baudRate, setBaudRate] = useState(115200);
   const [pcanAddress, setPcanAddress] = useState('192.168.1.100:8080');
   const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
   
   const [library, setLibrary] = useState<ConversionLibrary>({
     id: 'default-pcan-lib',
@@ -33,14 +34,55 @@ const App: React.FC = () => {
 
   const frameMapRef = useRef<Map<string, CANFrame>>(new Map());
   const pendingFramesRef = useRef<CANFrame[]>([]);
-  const lastUpdateRef = useRef<number>(0);
   const isPausedRef = useRef(isPaused);
+  
+  // Serial Refs
+  const serialPortRef = useRef<any>(null);
+  const serialReaderRef = useRef<any>(null);
+  const keepReadingRef = useRef(false);
+
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
   const addDebugLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
     setDebugLog(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
   }, []);
+
+  const generateTraceFile = (framesToSave: CANFrame[]) => {
+    const startTime = new Date().toISOString();
+    // Use an array to build the string for performance with 1,000,000 frames
+    const lines: string[] = [];
+    
+    lines.push(`$VERSION=1.1`);
+    lines.push(`$STARTTIME=${startTime}`);
+    lines.push(`;`);
+    lines.push(`;   Message   Time      Type ID              Rx/Tx`);
+    lines.push(`;   Number    Offset    |    [hex]           |  Data Length`);
+    lines.push(`;   |         [ms]      |    |               |  |  Data [hex] ...`);
+    lines.push(`;---+--  ---+----  ---+--  ---------+--  -+- +- +- -- -- -- -- -- -- -- --`);
+
+    // Process frames in the array for high performance
+    for (let i = 0; i < framesToSave.length; i++) {
+      const f = framesToSave[i];
+      const msgNum = (i + 1).toString().padStart(7, ' ');
+      const timeStr = (f.timestamp / 1000).toFixed(6).padStart(12, ' ');
+      const id = f.id.replace('0x', '').toUpperCase().padStart(12, ' ');
+      const dlc = f.dlc.toString().padStart(2, ' ');
+      const dataStr = f.data.join(' ');
+      lines.push(` ${msgNum}  ${timeStr}  DT  ${id}  Rx ${dlc} ${dataStr}`);
+    }
+
+    const content = lines.join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `OSM_Trace_${Date.now()}.trc`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const handleNewFrame = useCallback((id: string, dlc: number, data: string[]) => {
     if (isPausedRef.current) return;
@@ -85,15 +127,105 @@ const App: React.FC = () => {
       if (pendingFramesRef.current.length > 0) {
         const batch = [...pendingFramesRef.current];
         pendingFramesRef.current = [];
-        setFrames(prev => [...prev, ...batch].slice(-MAX_FRAME_LIMIT));
+        
+        setFrames(prev => {
+          const combined = [...prev, ...batch];
+          
+          // ROLLOVER LOGIC: If buffer exceeds limit, save and reset
+          if (combined.length >= MAX_FRAME_LIMIT) {
+            addDebugLog(`SYSTEM: Buffer limit hit (${MAX_FRAME_LIMIT.toLocaleString()}). Auto-exporting trace...`);
+            generateTraceFile(combined);
+            frameMapRef.current.clear(); // Reset uniqueness map for the new log
+            return []; // Return empty array to start fresh
+          }
+          
+          return combined;
+        });
+
         const latest: Record<string, CANFrame> = {};
-        batch.forEach(f => { latest[normalizeId(f.id.replace('0x',''), true)] = f; });
+        batch.forEach(f => { 
+          const cleanId = normalizeId(f.id.replace('0x',''), true);
+          latest[cleanId] = f; 
+        });
         setLatestFrames(prev => ({ ...prev, ...latest }));
         setHwStatus('active');
       }
     }, BATCH_UPDATE_INTERVAL);
     return () => clearInterval(interval);
-  }, []);
+  }, [addDebugLog]);
+
+  const connectSerial = async () => {
+    if (!("serial" in navigator)) {
+      addDebugLog("ERROR: Web Serial not supported in this browser.");
+      return;
+    }
+
+    try {
+      setBridgeStatus('connecting');
+      addDebugLog("SERIAL: Requesting port...");
+      const port = await (navigator as any).serial.requestPort();
+      await port.open({ baudRate });
+      serialPortRef.current = port;
+      setBridgeStatus('connected');
+      addDebugLog(`SERIAL: Connected at ${baudRate} bps.`);
+
+      keepReadingRef.current = true;
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (port.readable && keepReadingRef.current) {
+        serialReaderRef.current = port.readable.getReader();
+        try {
+          while (true) {
+            const { value, done } = await serialReaderRef.current.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              const cleanLine = line.trim();
+              if (!cleanLine) continue;
+              
+              if (cleanLine.startsWith('SYS:')) {
+                addDebugLog(`BRIDGE: ${cleanLine}`);
+                continue;
+              }
+
+              const parts = cleanLine.split('#');
+              if (parts.length >= 3) {
+                const id = parts[0];
+                const dlc = parseInt(parts[1]);
+                const data = parts[2].split(',');
+                handleNewFrame(id, dlc, data);
+              }
+            }
+          }
+        } catch (error) {
+          addDebugLog(`SERIAL_ERROR: ${error}`);
+        } finally {
+          serialReaderRef.current.releaseLock();
+        }
+      }
+    } catch (err) {
+      addDebugLog(`SERIAL_FAIL: ${err}`);
+      setBridgeStatus('disconnected');
+    }
+  };
+
+  const disconnectSerial = async () => {
+    keepReadingRef.current = false;
+    if (serialReaderRef.current) {
+      await serialReaderRef.current.cancel();
+    }
+    if (serialPortRef.current) {
+      await serialPortRef.current.close();
+      serialPortRef.current = null;
+    }
+    setBridgeStatus('disconnected');
+    addDebugLog("SERIAL: Disconnected.");
+  };
 
   const connectBridge = useCallback(() => {
     if (hardwareMode === 'esp32-bt' && (window as any).NativeBleBridge) {
@@ -101,15 +233,33 @@ const App: React.FC = () => {
       (window as any).NativeBleBridge.startBleLink();
       return;
     }
-    // Fallback for PCAN or other modes logic...
-    addDebugLog(`Mode ${hardwareMode} started...`);
-  }, [hardwareMode, addDebugLog]);
+
+    if (hardwareMode === 'esp32-serial') {
+      connectSerial();
+      return;
+    }
+
+    addDebugLog(`Mode ${hardwareMode} logic not fully implemented for web.`);
+  }, [hardwareMode, addDebugLog, baudRate]);
 
   const disconnectHardware = useCallback(() => {
+    if (hardwareMode === 'esp32-serial') {
+      disconnectSerial();
+      return;
+    }
     if ((window as any).NativeBleBridge) (window as any).NativeBleBridge.disconnectBle();
     setBridgeStatus('disconnected');
     setHwStatus('offline');
-  }, []);
+  }, [hardwareMode]);
+
+  const onManualSave = () => {
+    setIsSaving(true);
+    // Use a small timeout to let the UI show the "Saving" state before the heavy work
+    setTimeout(() => {
+      generateTraceFile(frames);
+      setIsSaving(false);
+    }, 100);
+  };
 
   if (view === 'home') {
     return (
@@ -149,7 +299,13 @@ const App: React.FC = () => {
         ) : dashboardTab === 'analysis' ? (
           <TraceAnalysisDashboard frames={frames} library={library} />
         ) : dashboardTab === 'trace' ? (
-          <CANMonitor frames={frames} isPaused={isPaused} library={library} />
+          <CANMonitor 
+            frames={frames} 
+            isPaused={isPaused} 
+            library={library} 
+            onSaveTrace={onManualSave}
+            isSaving={isSaving}
+          />
         ) : (
           <LibraryPanel library={library} onUpdateLibrary={setLibrary} latestFrames={latestFrames} />
         )}
