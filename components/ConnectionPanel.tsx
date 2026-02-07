@@ -37,14 +37,11 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   const [isNative, setIsNative] = useState(false);
 
   useEffect(() => {
-    // Check if running inside the Android Native App via JavascriptInterface
     const isNativeApp = (window as any).AndroidInterface?.isNativeApp?.() || false;
     setIsNative(isNativeApp);
     
-    // Web Bluetooth check
     setBtSupported(!!(navigator as any).bluetooth);
     
-    // Protocol check
     const protocolValid = window.location.protocol === 'https:' || 
                          window.location.hostname === 'localhost' || 
                          window.location.hostname === '127.0.0.1' ||
@@ -52,15 +49,14 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
     setIsHttps(protocolValid);
   }, []);
 
-  // Soft block: only prevent connection if we are 100% sure it's impossible (e.g., missing API on non-native)
-  // For native, we allow "Connect" even if btSupported is false, in case the user has a bridge or specific setting.
   const canAttemptConnection = () => {
     if (hardwareMode === 'pcan') return true;
     if (hardwareMode === 'esp32-bt') {
-      return isNative || (btSupported && isHttps);
+      // In mobile WebView, even if permissions are granted, the API is usually null.
+      return !!(navigator as any).bluetooth;
     }
     if (hardwareMode === 'esp32-serial') {
-      return isNative || (!!(navigator as any).serial);
+      return !!(navigator as any).serial;
     }
     return true;
   };
@@ -77,7 +73,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
            <div className="flex-1">
               <h4 className="text-[11px] font-orbitron font-black text-emerald-900 uppercase tracking-widest">Tactical Mobile Link</h4>
               <p className="text-[10px] text-emerald-600 font-medium leading-relaxed">
-                App mode enabled. PCAN mode is recommended for highest reliability.
+                Native Wrapper Detected. Bluetooth/Serial APIs are restricted in Android WebViews. Use <span className="font-bold">PCAN WebSocket</span> for live data.
               </p>
            </div>
         </div>
@@ -115,11 +111,11 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               <button 
                 onClick={() => onSetHardwareMode('pcan')}
                 className={`flex flex-col items-center gap-3 p-4 rounded-3xl border transition-all ${
-                  hardwareMode === 'pcan' ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'
+                  hardwareMode === 'pcan' ? 'bg-indigo-600 border-indigo-700 text-white shadow-xl ring-4 ring-indigo-500/20' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'
                 }`}
               >
                 <Globe size={20} />
-                <span className="text-[8px] font-orbitron font-black uppercase">PCAN</span>
+                <span className="text-[8px] font-orbitron font-black uppercase">PCAN (Best)</span>
               </button>
               <button 
                 onClick={() => onSetHardwareMode('esp32-serial')}
@@ -159,7 +155,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                       />
                     </div>
                     <div className="flex items-center justify-between text-[10px] font-bold">
-                        <span className="text-slate-500">Network Readiness</span>
+                        <span className="text-slate-500">WebSocket Readiness</span>
                         <ShieldCheck size={14} className="text-emerald-500" />
                     </div>
                  </div>
@@ -174,18 +170,19 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                  </div>
                  <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between text-[10px] font-bold">
-                        <span className="text-slate-500">Native Bridge Support</span>
-                        {isNative ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-amber-500" />}
+                        <span className="text-slate-500">Permissions (Android)</span>
+                        <ShieldCheck size={14} className="text-emerald-500" />
                     </div>
                     <div className="flex items-center justify-between text-[10px] font-bold">
-                        <span className="text-slate-500">Browser Capability</span>
+                        <span className="text-slate-500">Browser Capability (WebView)</span>
                         {btSupported ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-red-500" />}
                     </div>
                  </div>
-                 {isNative && !btSupported && (
-                   <div className="mt-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
-                      <p className="text-[8px] text-indigo-600 font-bold uppercase leading-tight">
-                        * WebView restriction detected. Ensure location permissions are granted in app settings for BLE scanning.
+                 {!btSupported && (
+                   <div className="mt-2 p-3 bg-red-50 rounded-xl border border-red-100">
+                      <p className="text-[9px] text-red-600 font-bold uppercase leading-tight">
+                        * FATAL: Android WebView does not support Web Bluetooth. <br/>
+                        <span className="font-black text-[10px]">FIX: Switch to "PCAN" mode above.</span>
                       </p>
                    </div>
                  )}
@@ -211,10 +208,9 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                       </button>
                     ))}
                  </div>
-                 <div className="flex items-center justify-between text-[10px] font-bold mt-2">
-                    <span className="text-slate-500">OTG Serial Support</span>
-                    {isNative ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-slate-300" />}
-                 </div>
+                 <p className="text-[8px] text-slate-400 uppercase font-bold text-center mt-2 italic">
+                    Note: WebSerial is typically disabled in Android WebView.
+                 </p>
               </div>
             )}
           </div>
