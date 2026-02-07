@@ -159,12 +159,10 @@ const App: React.FC = () => {
       socket.onmessage = (event) => {
         try {
           const raw = JSON.parse(event.data);
-          // Expecting format: { id: "123", dlc: 8, data: ["AA", "BB"...] }
           if (raw.id && raw.data) {
             handleNewFrame(raw.id, raw.dlc || raw.data.length, raw.data);
           }
         } catch {
-          // Fallback to line-based parsing if not JSON
           parseESP32Line(event.data);
         }
       };
@@ -186,6 +184,11 @@ const App: React.FC = () => {
   }, [pcanAddress, addDebugLog, handleNewFrame, parseESP32Line, bridgeStatus]);
 
   const connectESP32Serial = async () => {
+    if (!(navigator as any).serial) {
+      addDebugLog("ERROR: WebSerial not supported in this environment.");
+      setBridgeStatus('error');
+      return;
+    }
     try {
       setBridgeStatus('connecting');
       const port = await (navigator as any).serial.requestPort();
@@ -214,6 +217,12 @@ const App: React.FC = () => {
   };
 
   const connectESP32Bluetooth = async () => {
+    if (!(navigator as any).bluetooth) {
+      addDebugLog("ERROR: Web Bluetooth not supported in WebView.");
+      addDebugLog("ACTION: Use PCAN WebSocket mode for mobile data.");
+      setBridgeStatus('error');
+      return;
+    }
     try {
       setBridgeStatus('connecting');
       const device = await (navigator as any).bluetooth.requestDevice({
@@ -313,7 +322,6 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Mobile Bottom Navigation */}
       <nav className="h-20 bg-white border-t flex items-center justify-around px-4 pb-2 shrink-0 z-[100] safe-pb">
         {[
             { id: 'link', icon: Bluetooth, label: 'LINK' },
