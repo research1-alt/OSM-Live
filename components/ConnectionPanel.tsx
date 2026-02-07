@@ -50,15 +50,20 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                          window.location.hostname === '127.0.0.1' ||
                          isNativeApp; 
     setIsHttps(protocolValid);
+  }, []);
 
-    // Default to PCAN if native since others are restricted
-    if (isNativeApp && hardwareMode !== 'pcan') {
-      onSetHardwareMode('pcan');
+  // Soft block: only prevent connection if we are 100% sure it's impossible (e.g., missing API on non-native)
+  // For native, we allow "Connect" even if btSupported is false, in case the user has a bridge or specific setting.
+  const canAttemptConnection = () => {
+    if (hardwareMode === 'pcan') return true;
+    if (hardwareMode === 'esp32-bt') {
+      return isNative || (btSupported && isHttps);
     }
-  }, [isNative, onSetHardwareMode]);
-
-  const isBluetoothBlocked = hardwareMode === 'esp32-bt' && !isNative && (!btSupported || !isHttps);
-  const showPcanSupport = hardwareMode === 'pcan';
+    if (hardwareMode === 'esp32-serial') {
+      return isNative || (!!(navigator as any).serial);
+    }
+    return true;
+  };
 
   return (
     <div className="flex flex-col gap-4 w-full max-w-5xl mx-auto pt-2 animate-in fade-in pb-10 overflow-y-auto max-h-full custom-scrollbar px-4">
@@ -70,9 +75,9 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               <Smartphone size={20} />
            </div>
            <div className="flex-1">
-              <h4 className="text-[11px] font-orbitron font-black text-emerald-900 uppercase tracking-widest">Mobile Native Link Active</h4>
+              <h4 className="text-[11px] font-orbitron font-black text-emerald-900 uppercase tracking-widest">Tactical Mobile Link</h4>
               <p className="text-[10px] text-emerald-600 font-medium leading-relaxed">
-                App environment detected. Use <span className="font-bold">PCAN WebSocket</span> for wireless link via local gateway.
+                App mode enabled. PCAN mode is recommended for highest reliability.
               </p>
            </div>
         </div>
@@ -83,7 +88,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
            </div>
            <div className="flex-1">
               <h4 className="text-[11px] font-orbitron font-black text-indigo-900 uppercase tracking-widest">Hardware Interfacing</h4>
-              <p className="text-[10px] text-indigo-600 font-medium leading-relaxed">Choose between high-speed <span className="font-bold">PCAN WebSocket</span>, wired <span className="font-bold">ESP32 Serial</span>, or wireless <span className="font-bold">ESP32 Bluetooth</span>.</p>
+              <p className="text-[10px] text-indigo-600 font-medium leading-relaxed">Choose your link method. Use <span className="font-bold">PCAN</span> for wireless bridges.</p>
            </div>
         </div>
       )}
@@ -118,20 +123,18 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               </button>
               <button 
                 onClick={() => onSetHardwareMode('esp32-serial')}
-                disabled={isNative}
                 className={`flex flex-col items-center gap-3 p-4 rounded-3xl border transition-all ${
                   hardwareMode === 'esp32-serial' ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'
-                } ${isNative ? 'opacity-30 cursor-not-allowed' : ''}`}
+                }`}
               >
                 <Cable size={20} />
                 <span className="text-[8px] font-orbitron font-black uppercase">Wired</span>
               </button>
               <button 
                 onClick={() => onSetHardwareMode('esp32-bt')}
-                disabled={isNative}
                 className={`flex flex-col items-center gap-3 p-4 rounded-3xl border transition-all ${
                   hardwareMode === 'esp32-bt' ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'
-                } ${isNative ? 'opacity-30 cursor-not-allowed' : ''}`}
+                }`}
               >
                 <Bluetooth size={20} />
                 <span className="text-[8px] font-orbitron font-black uppercase">BLE</span>
@@ -163,7 +166,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               </div>
             )}
 
-            {hardwareMode === 'esp32-bt' && !isNative && (
+            {hardwareMode === 'esp32-bt' && (
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
                  <div className="flex items-center justify-between text-[9px] font-orbitron font-black uppercase tracking-widest">
                     <span className="text-slate-400">BT Readiness Check</span>
@@ -171,22 +174,47 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                  </div>
                  <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between text-[10px] font-bold">
-                        <span className="text-slate-500">Browser Support</span>
-                        {btSupported ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-red-500" />}
+                        <span className="text-slate-500">Native Bridge Support</span>
+                        {isNative ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-amber-500" />}
                     </div>
                     <div className="flex items-center justify-between text-[10px] font-bold">
-                        <span className="text-slate-500">Security (HTTPS)</span>
-                        {isHttps ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-red-500" />}
+                        <span className="text-slate-500">Browser Capability</span>
+                        {btSupported ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-red-500" />}
                     </div>
                  </div>
+                 {isNative && !btSupported && (
+                   <div className="mt-2 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                      <p className="text-[8px] text-indigo-600 font-bold uppercase leading-tight">
+                        * WebView restriction detected. Ensure location permissions are granted in app settings for BLE scanning.
+                      </p>
+                   </div>
+                 )}
               </div>
             )}
 
-            {isNative && (hardwareMode === 'esp32-bt' || hardwareMode === 'esp32-serial') && (
-              <div className="bg-red-50 border border-red-100 p-4 rounded-2xl animate-pulse">
-                <p className="text-[9px] text-red-600 font-bold uppercase text-center">
-                  * Hardware Link restricted in Mobile WebView. <br/> Switch to PCAN WebSocket mode.
-                </p>
+            {hardwareMode === 'esp32-serial' && (
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
+                 <div className="flex items-center justify-between text-[9px] font-orbitron font-black uppercase tracking-widest">
+                    <span className="text-slate-400">Serial Configuration</span>
+                    <Cable size={12} className="text-indigo-400" />
+                 </div>
+                 <div className="grid grid-cols-3 gap-2">
+                    {[115200, 500000, 921600].map(rate => (
+                      <button 
+                        key={rate} 
+                        onClick={() => setBaudRate(rate)}
+                        className={`py-2 rounded-xl border font-mono text-[9px] font-bold transition-all ${
+                          baudRate === rate ? 'bg-indigo-600 border-indigo-500 text-white shadow-md' : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
+                        }`}
+                      >
+                        {rate.toLocaleString()}
+                      </button>
+                    ))}
+                 </div>
+                 <div className="flex items-center justify-between text-[10px] font-bold mt-2">
+                    <span className="text-slate-500">OTG Serial Support</span>
+                    {isNative ? <ShieldCheck size={14} className="text-emerald-500" /> : <ShieldAlert size={14} className="text-slate-300" />}
+                 </div>
               </div>
             )}
           </div>
@@ -194,7 +222,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
           <div className="space-y-6">
             <button 
               onClick={() => status === 'connected' ? onDisconnect() : onConnect()}
-              disabled={status === 'connecting' || isBluetoothBlocked || (isNative && hardwareMode !== 'pcan')}
+              disabled={status === 'connecting' || !canAttemptConnection()}
               className={`w-full py-6 rounded-3xl text-[11px] font-orbitron font-black uppercase tracking-[0.4em] transition-all flex items-center justify-center gap-4 shadow-xl active:scale-95 ${
                 status === 'connected' ? 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/20'
               } disabled:opacity-50 disabled:cursor-not-allowed`}
