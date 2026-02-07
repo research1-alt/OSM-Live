@@ -8,7 +8,7 @@ import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary } from '@
 import { MY_CUSTOM_DBC, DEFAULT_LIBRARY_NAME } from '@/data/dbcProfiles';
 import { normalizeId, formatIdForDisplay } from '@/utils/decoder';
 
-const MAX_FRAME_LIMIT = 10000; // Updated to 10,000 as requested
+const MAX_FRAME_LIMIT = 1000000; // 1,000,000 frame buffer
 const BATCH_UPDATE_INTERVAL = 60; 
 
 const App: React.FC = () => {
@@ -35,6 +35,7 @@ const App: React.FC = () => {
   const frameMapRef = useRef<Map<string, CANFrame>>(new Map());
   const pendingFramesRef = useRef<CANFrame[]>([]);
   const isPausedRef = useRef(isPaused);
+  const currentFramesRef = useRef<CANFrame[]>([]);
   
   // Serial Refs
   const serialPortRef = useRef<any>(null);
@@ -42,41 +43,62 @@ const App: React.FC = () => {
   const keepReadingRef = useRef(false);
 
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { currentFramesRef.current = frames; }, [frames]);
 
   const addDebugLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
     setDebugLog(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
   }, []);
 
-  const generateTraceFile = (framesToSave: CANFrame[]) => {
+  const generateTraceFile = useCallback((framesToSave: CANFrame[], isAuto: boolean = false) => {
+    if (framesToSave.length === 0) return;
+    
+    setIsSaving(true);
     const startTime = new Date().toISOString();
-    let content = `$VERSION=1.1\n`;
-    content += `$STARTTIME=${startTime}\n`;
-    content += `;\n`;
-    content += `;   Message   Time      Type ID              Rx/Tx\n`;
-    content += `;   Number    Offset    |    [hex]           |  Data Length\n`;
-    content += `;   |         [ms]      |    |               |  |  Data [hex] ...\n`;
-    content += `;---+--  ---+----  ---+--  ---------+--  -+- +- +- -- -- -- -- -- -- -- --\n`;
+    
+    // Performance optimization for 1,000,000 frames: Use an array and join at the end
+    // This is much faster and memory-efficient than string concatenation (+=)
+    const lines: string[] = [];
+    lines.push(`$VERSION=1.1`);
+    lines.push(`$STARTTIME=${startTime}`);
+    lines.push(`; Log Type: ${isAuto ? 'AUTO_ROLLOVER' : 'MANUAL_EXPORT'}`);
+    lines.push(`; Total Frames: ${framesToSave.length.toLocaleString()}`);
+    lines.push(`;`);
+    lines.push(`;   Message   Time      Type ID              Rx/Tx`);
+    lines.push(`;   Number    Offset    |    [hex]           |  Data Length`);
+    lines.push(`;   |         [ms]      |    |               |  |  Data [hex] ...`);
+    lines.push(`;---+--  ---+----  ---+--  ---------+--  -+- +- +- -- -- -- -- -- -- -- --`);
 
-    framesToSave.forEach((f, i) => {
+    for (let i = 0; i < framesToSave.length; i++) {
+      const f = framesToSave[i];
       const msgNum = (i + 1).toString().padStart(7, ' ');
       const timeStr = (f.timestamp / 1000).toFixed(6).padStart(12, ' ');
       const id = f.id.replace('0x', '').toUpperCase().padStart(12, ' ');
       const dlc = f.dlc.toString().padStart(2, ' ');
       const dataStr = f.data.join(' ');
-      content += ` ${msgNum}  ${timeStr}  DT  ${id}  Rx ${dlc} ${dataStr}\n`;
-    });
+      lines.push(` ${msgNum}  ${timeStr}  DT  ${id}  Rx ${dlc} ${dataStr}`);
+    }
 
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `OSM_Trace_${Date.now()}.trc`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
+    try {
+      const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `OSM_${isAuto ? 'Auto' : 'Manual'}_Trace_${Date.now()}.trc`;
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup to prevent memory leaks, especially important on mobile
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        setIsSaving(false);
+      }, 1000);
+    } catch (err) {
+      addDebugLog(`ERROR: Export failed - ${err}`);
+      setIsSaving(false);
+    }
+  }, [addDebugLog]);
 
   const handleNewFrame = useCallback((id: string, dlc: number, data: string[]) => {
     if (isPausedRef.current) return;
@@ -122,18 +144,26 @@ const App: React.FC = () => {
         const batch = [...pendingFramesRef.current];
         pendingFramesRef.current = [];
         
+        // Use functional state update to handle the buffer and rollover
         setFrames(prev => {
-          const combined = [...prev, ...batch];
+          const totalAfterBatch = prev.length + batch.length;
           
-          // ROLLOVER LOGIC: If buffer exceeds limit, save and reset
-          if (combined.length >= MAX_FRAME_LIMIT) {
-            addDebugLog(`SYSTEM: Buffer limit hit (${MAX_FRAME_LIMIT}). Auto-exporting trace...`);
-            generateTraceFile(combined);
-            frameMapRef.current.clear(); // Reset uniqueness map for the new log
-            return []; // Return empty array to start fresh
+          if (totalAfterBatch >= MAX_FRAME_LIMIT) {
+            addDebugLog(`SYSTEM: 1M Frame Buffer Full. Auto-saving and resetting...`);
+            
+            // To ensure the UI stays responsive and the download starts, 
+            // we save the *full* current state before clearing.
+            const framesToSave = [...prev, ...batch];
+            
+            // Trigger download asynchronously to not block the state update
+            setTimeout(() => generateTraceFile(framesToSave, true), 10);
+            
+            // Reset for the "New Log"
+            frameMapRef.current.clear();
+            return []; // Start new log from empty
           }
           
-          return combined;
+          return [...prev, ...batch];
         });
 
         const latest: Record<string, CANFrame> = {};
@@ -146,7 +176,7 @@ const App: React.FC = () => {
       }
     }, BATCH_UPDATE_INTERVAL);
     return () => clearInterval(interval);
-  }, [addDebugLog]);
+  }, [addDebugLog, generateTraceFile]);
 
   const connectSerial = async () => {
     if (!("serial" in navigator)) {
@@ -247,9 +277,7 @@ const App: React.FC = () => {
   }, [hardwareMode]);
 
   const onManualSave = () => {
-    setIsSaving(true);
-    generateTraceFile(frames);
-    setTimeout(() => setIsSaving(false), 1000);
+    generateTraceFile(frames, false);
   };
 
   if (view === 'home') {
