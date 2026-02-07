@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Play, Pause, RefreshCw, Cpu, ArrowLeft, Download, FileUp, Loader2, Database, Activity, Zap, BarChart3, Settings2, ShieldAlert, Cable, AlertTriangle, Power, Save, Bluetooth, Menu, X } from 'lucide-react';
+import { Play, Pause, RefreshCw, Cpu, ArrowLeft, Download, FileUp, Loader2, Database, Activity, Zap, BarChart3, Settings2, ShieldAlert, Cable, AlertTriangle, Power, Save, Bluetooth, LayoutGrid, ListFilter } from 'lucide-react';
 import CANMonitor from '@/components/CANMonitor';
 import ConnectionPanel from '@/components/ConnectionPanel';
 import LibraryPanel from '@/components/LibraryPanel';
@@ -13,8 +13,8 @@ type AppView = 'home' | 'live';
 type DashboardTab = 'link' | 'trace' | 'library' | 'analysis';
 type HardwareMode = 'pcan' | 'esp32-serial' | 'esp32-bt';
 
-const MAX_FRAME_LIMIT = 5000; // Lowered slightly for mobile memory
-const BATCH_UPDATE_INTERVAL = 60; // Slightly higher for mobile CPU efficiency
+const MAX_FRAME_LIMIT = 5000;
+const BATCH_UPDATE_INTERVAL = 60; 
 
 const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const UART_TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
@@ -22,7 +22,7 @@ const UART_TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('home');
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>('link');
-  const [hardwareMode, setHardwareMode] = useState<HardwareMode>('esp32-bt'); // Default to BLE for mobile
+  const [hardwareMode, setHardwareMode] = useState<HardwareMode>('esp32-bt');
   const [frames, setFrames] = useState<CANFrame[]>([]);
   const [latestFrames, setLatestFrames] = useState<Record<string, CANFrame>>({});
   const [isPaused, setIsPaused] = useState(false);
@@ -32,7 +32,6 @@ const App: React.FC = () => {
   const [rxByteCount, setRxByteCount] = useState(0);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [library, setLibrary] = useState<ConversionLibrary>({
     id: 'default-pcan-lib',
@@ -52,43 +51,11 @@ const App: React.FC = () => {
   const frameMapRef = useRef<Map<string, CANFrame>>(new Map());
   const pendingFramesRef = useRef<CANFrame[]>([]);
   const lastUpdateRef = useRef<number>(0);
-  const autoSaveCountRef = useRef<number>(0);
 
   const addDebugLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
     setDebugLog(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
   }, []);
-
-  const handleSaveTrace = useCallback(async (framesToSave: CANFrame[]) => {
-    if (framesToSave.length === 0) return;
-    setIsSaving(true);
-    addDebugLog(`SYSTEM: AUTO-SAVING TRACE...`);
-    
-    try {
-      const header = "; PCAN Trace File\n; Created by OSM Tactical HUD Mobile\n;-------------------------------------------------------------------------------\n";
-      const rows: string[] = [header];
-      for (let i = 0; i < framesToSave.length; i++) {
-        const f = framesToSave[i];
-        const msgNum = (i + 1).toString().padStart(7, ' ');
-        const timeStr = (f.timestamp / 1000).toFixed(6).padStart(12, ' ');
-        const hexId = f.id.replace('0x', '').toUpperCase().padStart(12, ' ');
-        const hexData = f.data.map(d => d.padStart(2, '0')).join(' ');
-        rows.push(`${msgNum}  ${timeStr}  DT  ${hexId}  Rx ${f.dlc}  ${hexData}\n`);
-      }
-      const blob = new Blob(rows, { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      autoSaveCountRef.current++;
-      link.download = `OSM_Trace_${Date.now()}.trc`;
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (err: any) {
-      addDebugLog(`ERROR: SAVE FAILED - ${err.message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [addDebugLog]);
 
   const handleNewFrame = useCallback((id: string, dlc: number, data: string[]) => {
     if (isPausedRef.current) return;
@@ -122,9 +89,8 @@ const App: React.FC = () => {
     if (parts.length >= 3) {
       const id = parts[0].trim();
       const dlc = parseInt(parts[1].trim());
-      const rawData = parts[2].trim();
-      const data = rawData.split(/[, ]+/).filter(x => x.length > 0);
-      if (id && !isNaN(dlc) && data.length > 0) handleNewFrame(id, dlc, data);
+      const data = parts[2].trim().split(/[, ]+/).filter(x => x.length > 0);
+      if (id && !isNaN(dlc)) handleNewFrame(id, dlc, data);
     }
   }, [addDebugLog, handleNewFrame]);
 
@@ -135,17 +101,19 @@ const App: React.FC = () => {
       if (now - lastUpdateRef.current >= BATCH_UPDATE_INTERVAL && pendingFramesRef.current.length > 0) {
         const batch = [...pendingFramesRef.current];
         pendingFramesRef.current = [];
+        
         setFrames(prev => {
           const combined = [...prev, ...batch];
-          if (combined.length >= MAX_FRAME_LIMIT) return combined.slice(-MAX_FRAME_LIMIT);
-          return combined;
+          return combined.length >= MAX_FRAME_LIMIT ? combined.slice(-MAX_FRAME_LIMIT) : combined;
         });
+
         const latest: Record<string, CANFrame> = {};
         batch.forEach(f => {
           const rawHex = f.id.replace('0x', '');
           const normId = normalizeId(rawHex, true);
           latest[normId] = f;
         });
+
         setLatestFrames(prev => ({ ...prev, ...latest }));
         setHwStatus('active');
         lastUpdateRef.current = now;
@@ -161,6 +129,9 @@ const App: React.FC = () => {
       if (btDeviceRef.current.gatt.connected) btDeviceRef.current.gatt.disconnect();
       btDeviceRef.current = null;
     }
+    if (serialReaderRef.current) {
+      try { await serialReaderRef.current.cancel(); serialReaderRef.current.releaseLock(); } catch {}
+    }
     if (serialPortRef.current) { try { await serialPortRef.current.close(); } catch {} }
     setBridgeStatus('disconnected');
     setHwStatus('offline');
@@ -168,21 +139,17 @@ const App: React.FC = () => {
   };
 
   const connectESP32Serial = async () => {
-    if (!('serial' in navigator)) {
-      addDebugLog("Web Serial not supported in this browser.");
-      return;
-    }
     try {
       setBridgeStatus('connecting');
       const port = await (navigator as any).serial.requestPort();
-      await port.open({ baudRate: baudRate, dtr: true, rts: true });
+      await port.open({ baudRate: baudRate });
       serialPortRef.current = port;
       setBridgeStatus('connected');
       sessionStartTimeRef.current = performance.now();
-      const decoder = new TextDecoder();
-      let buffer = '';
       const reader = port.readable.getReader();
       serialReaderRef.current = reader;
+      const decoder = new TextDecoder();
+      let buffer = '';
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -200,13 +167,8 @@ const App: React.FC = () => {
   };
 
   const connectESP32Bluetooth = async () => {
-    if (!(navigator as any).bluetooth) {
-      addDebugLog("Web Bluetooth not supported.");
-      return;
-    }
     try {
       setBridgeStatus('connecting');
-      addDebugLog("Searching for OSM device...");
       const device = await (navigator as any).bluetooth.requestDevice({
         filters: [{ namePrefix: 'OSM_CAN' }],
         optionalServices: [UART_SERVICE_UUID]
@@ -228,10 +190,7 @@ const App: React.FC = () => {
         buffer = lines.pop() || '';
         for (const line of lines) if (line.trim()) parseESP32Line(line);
       });
-      device.addEventListener('gattserverdisconnected', () => {
-        addDebugLog("BT Link Lost.");
-        disconnectHardware();
-      });
+      device.addEventListener('gattserverdisconnected', () => disconnectHardware());
     } catch (err: any) {
       addDebugLog(`BT Error: ${err.message}`);
       setBridgeStatus('error');
@@ -246,65 +205,37 @@ const App: React.FC = () => {
 
   if (view === 'home') {
     return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-white px-6 text-center">
-        <h1 className="text-6xl md:text-8xl font-orbitron font-black text-slate-900 uppercase leading-none">OSM <span className="text-indigo-600">LIVE</span></h1>
-        <p className="mt-4 text-[10px] font-orbitron font-bold text-slate-400 uppercase tracking-[0.5em]">Tactical Mobile Interface</p>
-        <button onClick={() => setView('live')} className="mt-16 w-full max-w-xs py-6 bg-indigo-600 text-white rounded-3xl font-orbitron font-black uppercase shadow-2xl hover:bg-indigo-700 active:scale-95 transition-all">
-          Launch HUD
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-white px-6">
+        <div className="bg-indigo-600 p-6 rounded-[32px] text-white shadow-2xl mb-12 animate-bounce">
+            <Cpu size={64} />
+        </div>
+        <h1 className="text-4xl md:text-8xl font-orbitron font-black text-slate-900 uppercase text-center leading-none">OSM <span className="text-indigo-600">LIVE</span></h1>
+        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-4 mb-12">Tactical CAN Bus HUD for Mobile</p>
+        <button onClick={() => setView('live')} className="w-full max-w-xs py-6 bg-indigo-600 text-white rounded-3xl font-orbitron font-black uppercase shadow-2xl hover:bg-indigo-700 transition-all active:scale-95">
+          Launch Mobile HUD
         </button>
       </div>
     );
   }
 
   return (
-    <div className="h-screen w-full flex flex-col overflow-hidden bg-slate-50">
-      <header className="h-16 md:h-20 border-b flex items-center justify-between px-4 md:px-10 bg-white/90 backdrop-blur-xl z-[70]">
-        <div className="flex items-center gap-3 md:gap-6">
-          <button onClick={() => { disconnectHardware(); setView('home'); }} className="p-2.5 bg-slate-100 rounded-xl">
-            <ArrowLeft size={18} className="text-slate-600" />
+    <div className="h-screen w-full flex flex-col overflow-hidden bg-slate-50 safe-pt">
+      <header className="h-16 border-b flex items-center justify-between px-6 bg-white/95 backdrop-blur-xl z-[70] shrink-0">
+        <div className="flex items-center gap-4">
+          <button onClick={() => { disconnectHardware(); setView('home'); }} className="p-2 hover:bg-slate-100 rounded-xl">
+            <ArrowLeft size={20} className="text-slate-600" />
           </button>
-          
-          <div className="hidden md:flex bg-slate-100 p-1 rounded-xl gap-1">
-            {['link', 'trace', 'library', 'analysis'].map((tab) => (
-              <button key={tab} onClick={() => setDashboardTab(tab as any)} className={`px-4 py-1.5 rounded-lg text-[9px] font-orbitron font-black uppercase tracking-widest ${dashboardTab === tab ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}>
-                {tab}
-              </button>
-            ))}
-          </div>
-          
-          <div className="md:hidden">
-            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
-              {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
-            </button>
-          </div>
+          <h2 className="text-[12px] font-orbitron font-black text-slate-900 uppercase tracking-tighter">OSM_MOBILE_LINK</h2>
         </div>
-
-        <div className="flex items-center gap-2 md:gap-6">
-          <div className={`px-3 py-1 rounded-lg border font-mono text-[9px] font-bold ${
-            bridgeStatus === 'connected' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
-            bridgeStatus === 'error' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-slate-50 text-slate-400'
-          }`}>
-            {bridgeStatus.toUpperCase()}
-          </div>
-          <button onClick={() => setIsPaused(!isPaused)} className={`px-4 md:px-8 py-2 md:py-3 rounded-xl text-[9px] font-orbitron font-black uppercase ${isPaused ? 'bg-amber-500 text-white' : 'bg-white text-slate-600 border'}`}>
-            {isPaused ? 'RESUME' : 'PAUSE'}
-          </button>
+        <div className="flex items-center gap-3">
+            <div className={`w-3 h-3 rounded-full animate-pulse ${bridgeStatus === 'connected' ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+            <button onClick={() => setIsPaused(!isPaused)} className={`p-2 rounded-xl border ${isPaused ? 'bg-amber-500 text-white border-amber-600' : 'bg-white text-slate-400 border-slate-200'}`}>
+                {isPaused ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />}
+            </button>
         </div>
       </header>
 
-      {mobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 top-16 bg-white z-[65] animate-in slide-in-from-top duration-300 p-6">
-          <div className="grid grid-cols-1 gap-4">
-            {['link', 'trace', 'library', 'analysis'].map((tab) => (
-              <button key={tab} onClick={() => { setDashboardTab(tab as any); setMobileMenuOpen(false); }} className={`w-full py-6 rounded-3xl text-sm font-orbitron font-black uppercase tracking-widest border transition-all ${dashboardTab === tab ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
-                {tab}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <main className="flex-1 p-3 md:p-6 overflow-hidden">
+      <main className="flex-1 overflow-hidden relative">
         {dashboardTab === 'link' ? (
           <ConnectionPanel 
             status={bridgeStatus} hwStatus={hwStatus} hardwareMode={hardwareMode}
@@ -318,7 +249,7 @@ const App: React.FC = () => {
             frames={frames} 
             isPaused={isPaused} 
             library={library} 
-            onSaveTrace={() => handleSaveTrace(frames)}
+            onSaveTrace={() => addDebugLog("Mobile save restricted to buffer")}
             isSaving={isSaving}
           />
         ) : (
@@ -326,19 +257,24 @@ const App: React.FC = () => {
         )}
       </main>
 
-      <footer className="h-10 md:h-12 border-t bg-white px-4 md:px-10 flex items-center justify-between text-[8px] font-orbitron font-black text-slate-400 uppercase tracking-widest">
-          <div className="flex items-center gap-4 md:gap-8">
-            <div className="flex items-center gap-2">
-              <Power size={10} className={hwStatus === 'active' ? 'text-indigo-600' : 'text-slate-300'} />
-              <span className="hidden md:inline">LINK: </span><span className={hwStatus === 'active' ? 'text-emerald-500' : 'text-slate-400'}>{hwStatus.toUpperCase()}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Database size={10} className="text-indigo-600" />
-              <span>BUF: {frames.length}</span>
-            </div>
-          </div>
-          <div>OSM_M_V12</div>
-      </footer>
+      {/* Mobile Bottom Navigation */}
+      <nav className="h-20 bg-white border-t flex items-center justify-around px-4 pb-2 shrink-0 z-[100] safe-pb">
+        {[
+            { id: 'link', icon: Bluetooth, label: 'LINK' },
+            { id: 'trace', icon: Activity, label: 'HUD' },
+            { id: 'library', icon: Database, label: 'DATA' },
+            { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
+        ].map(tab => (
+            <button 
+                key={tab.id}
+                onClick={() => setDashboardTab(tab.id as any)}
+                className={`flex flex-col items-center gap-1.5 px-4 py-2 rounded-2xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}
+            >
+                <tab.icon size={20} />
+                <span className="text-[8px] font-orbitron font-black uppercase tracking-widest">{tab.label}</span>
+            </button>
+        ))}
+      </nav>
     </div>
   );
 };
