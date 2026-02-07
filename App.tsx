@@ -8,7 +8,7 @@ import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary } from '@
 import { MY_CUSTOM_DBC, DEFAULT_LIBRARY_NAME } from '@/data/dbcProfiles';
 import { normalizeId, formatIdForDisplay } from '@/utils/decoder';
 
-const MAX_FRAME_LIMIT = 10000; // Updated to 10,000 for testing as requested
+const MAX_FRAME_LIMIT = 10000; 
 const BATCH_UPDATE_INTERVAL = 60; 
 
 const App: React.FC = () => {
@@ -37,7 +37,6 @@ const App: React.FC = () => {
   const isPausedRef = useRef(isPaused);
   const currentFramesRef = useRef<CANFrame[]>([]);
   
-  // Serial Refs
   const serialPortRef = useRef<any>(null);
   const serialReaderRef = useRef<any>(null);
   const keepReadingRef = useRef(false);
@@ -57,9 +56,11 @@ const App: React.FC = () => {
     }
     
     setIsSaving(true);
-    addDebugLog(`SYSTEM: Generating ${isAuto ? 'Auto' : 'Manual'} Trace (${framesToSave.length} frames)...`);
+    addDebugLog(`SYSTEM: Exporting ${framesToSave.length} packets...`);
     
     const startTime = new Date().toISOString();
+    const fileName = `OSM_Trace_${isAuto ? 'Auto' : 'Manual'}_${Date.now()}.trc`;
+    
     const lines: string[] = [];
     lines.push(`$VERSION=1.1`);
     lines.push(`$STARTTIME=${startTime}`);
@@ -81,26 +82,35 @@ const App: React.FC = () => {
       lines.push(` ${msgNum}  ${timeStr}  DT  ${id}  Rx ${dlc} ${dataStr}`);
     }
 
+    const content = lines.join('\n');
+
+    // MOBILE BRIDGE EXECUTION
+    const nativeInterface = (window as any).AndroidInterface;
+    if (nativeInterface && nativeInterface.saveFile) {
+        try {
+            nativeInterface.saveFile(content, fileName);
+            addDebugLog("SYSTEM: Sent to Mobile Native IO.");
+            setIsSaving(false);
+            return;
+        } catch (e) {
+            addDebugLog(`NATIVE_BRIDGE_ERROR: ${e}`);
+        }
+    }
+
+    // WEB FALLBACK
     try {
-      const content = lines.join('\n');
       const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
-      
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `OSM_Trace_${isAuto ? 'Auto' : 'Manual'}_${Date.now()}.trc`);
-      
-      // Essential for mobile browsers/WebViews to trigger download
+      link.setAttribute('download', fileName);
       document.body.appendChild(link);
       link.click();
       
-      addDebugLog("SYSTEM: Export successful. Check downloads.");
+      addDebugLog("SYSTEM: Web Browser download triggered.");
       
-      // Delayed cleanup to ensure the download starts reliably on mobile
       setTimeout(() => {
-        if (document.body.contains(link)) {
-          document.body.removeChild(link);
-        }
+        if (document.body.contains(link)) document.body.removeChild(link);
         URL.revokeObjectURL(url);
         setIsSaving(false);
       }, 2000);
@@ -130,18 +140,14 @@ const App: React.FC = () => {
     pendingFramesRef.current.push(newFrame);
   }, []);
 
-  // Bridge for Native Android BLE
   useEffect(() => {
     (window as any).onNativeBleData = (line: string) => {
       const parts = line.split('#');
       if (parts.length >= 3) {
-        const id = parts[0];
-        const dlc = parseInt(parts[1]);
-        const data = parts[2].split(',');
-        handleNewFrame(id, dlc, data);
+        handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
       }
     };
-    (window as any).onNativeBleLog = (msg: string) => addDebugLog(`NATIVE: ${msg}`);
+    (window as any).onNativeBleLog = (msg: string) => addDebugLog(msg);
     (window as any).onNativeBleStatus = (status: string) => {
       if (status === 'connected') setBridgeStatus('connected');
       else if (status === 'disconnected') setBridgeStatus('disconnected');
@@ -156,15 +162,13 @@ const App: React.FC = () => {
         
         setFrames(prev => {
           const totalCount = prev.length + batch.length;
-          
           if (totalCount >= MAX_FRAME_LIMIT) {
-            addDebugLog(`SYSTEM: Buffer limit hit (${MAX_FRAME_LIMIT}). Rollover saving...`);
+            addDebugLog(`SYSTEM: Rollover Save Active (${MAX_FRAME_LIMIT} pkts).`);
             const framesToSave = [...prev, ...batch];
             setTimeout(() => generateTraceFile(framesToSave, true), 0);
             frameMapRef.current.clear();
             return [];
           }
-          
           return [...prev, ...batch];
         });
 
@@ -182,7 +186,7 @@ const App: React.FC = () => {
 
   const connectSerial = async () => {
     if (!("serial" in navigator)) {
-      addDebugLog("ERROR: Web Serial not supported.");
+      addDebugLog("ERROR: Web Serial unavailable.");
       return;
     }
     try {
@@ -191,7 +195,7 @@ const App: React.FC = () => {
       await port.open({ baudRate });
       serialPortRef.current = port;
       setBridgeStatus('connected');
-      addDebugLog(`SERIAL: Connected at ${baudRate} bps.`);
+      addDebugLog(`SERIAL: Port Active @ ${baudRate}`);
 
       keepReadingRef.current = true;
       const decoder = new TextDecoder();
@@ -237,7 +241,6 @@ const App: React.FC = () => {
   }, []);
 
   const onManualSave = () => {
-    // Crucial: Use currentFramesRef.current to get the actual most recent data
     generateTraceFile(currentFramesRef.current, false);
   };
 
