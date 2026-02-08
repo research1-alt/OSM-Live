@@ -5,6 +5,7 @@ import { hashPassword } from '../utils/crypto.ts';
 export const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwcBlWlN6AJC7d3cZ9JKeHiYzLu-8xmnrrziPWQaqVHbzbcy6hvsnGydmfS8tGXWkbBRA/exec';
 const STORAGE_VERSION = 'v1.2.0';
 export const ALLOWED_DOMAIN = '@omegaseikimobility.com';
+export const ADMIN_EMAIL = 'research1@omegaseikimobility.com';
 
 // MISSION CRITICAL: Targeted Spreadsheet Registry
 export const SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1xItnaIxqCiXgP3IOuWxVZlVGRD543WV1IU2r67PEl3w/edit';
@@ -18,6 +19,13 @@ export interface User {
 }
 
 export const authService = {
+  /**
+   * Identifies if a user has admin privileges.
+   */
+  isAdmin(email: string): boolean {
+    return email.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim();
+  },
+
   /**
    * Dual-Layer Check: Cloud First, then Local fallback.
    */

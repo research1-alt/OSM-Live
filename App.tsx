@@ -1,14 +1,15 @@
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Play, Pause, Cpu, ArrowLeft, Activity, Bluetooth, Zap, BarChart3, Database, LogOut, ExternalLink } from 'lucide-react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { Play, Pause, Cpu, ArrowLeft, Activity, Bluetooth, Zap, BarChart3, Database, LogOut, ExternalLink, LayoutDashboard, ShieldCheck } from 'lucide-react';
 import CANMonitor from '@/components/CANMonitor';
 import ConnectionPanel from '@/components/ConnectionPanel';
 import LibraryPanel from '@/components/LibraryPanel';
 import TraceAnalysisDashboard from '@/components/TraceAnalysisDashboard';
 import AuthScreen from '@/components/AuthScreen';
+import SignalGauges from '@/components/SignalGauges';
 import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary } from '@/types';
 import { MY_CUSTOM_DBC, DEFAULT_LIBRARY_NAME } from '@/data/dbcProfiles';
-import { normalizeId, formatIdForDisplay } from '@/utils/decoder';
+import { normalizeId, formatIdForDisplay, decodeSignal } from '@/utils/decoder';
 import { User, authService, SPREADSHEET_URL } from '@/services/authService';
 
 const MAX_FRAME_LIMIT = 1000000; 
@@ -19,7 +20,8 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [view, setView] = useState<'home' | 'live'>('home');
-  const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis'>('link');
+  // Set default tab to 'trace' (HUD) so the user sees the dashboard immediately after login
+  const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis'>('trace');
   const [hardwareMode, setHardwareMode] = useState<'pcan' | 'esp32-serial' | 'esp32-bt'>('pcan');
   const [frames, setFrames] = useState<CANFrame[]>([]);
   const [latestFrames, setLatestFrames] = useState<Record<string, CANFrame>>({});
@@ -36,6 +38,8 @@ const App: React.FC = () => {
     database: MY_CUSTOM_DBC,
     lastUpdated: Date.now(),
   });
+
+  const isAdmin = useMemo(() => user ? authService.isAdmin(user.email) : false, [user]);
 
   // Handle Session Persistence
   useEffect(() => {
@@ -56,7 +60,6 @@ const App: React.FC = () => {
 
     const interval = setInterval(async () => {
       const remoteSid = await authService.fetchRemoteSessionId(user.email);
-      // Conflict detection: if remote exists and is different from local
       if (remoteSid !== "NOT_FOUND" && remoteSid !== "ERROR" && remoteSid !== sessionId) {
         alert("⚠️ SESSION TERMINATED:\nYour account was logged in from another device.\nAccess has been revoked locally.");
         handleLogout();
@@ -193,6 +196,38 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [generateTraceFile]);
 
+  // Extract signal values for dashboard gauges
+  const gaugeData = useMemo(() => {
+    const result = [];
+    const windowSize = 50;
+    // We sample from frames to build a small history for the chart
+    for (let i = Math.max(0, frames.length - windowSize); i < frames.length; i++) {
+      const f = frames[i];
+      let rpm = 0;
+      let temp = 0;
+      let throttle = 0;
+
+      // Logic to find specific IDs in the frame and decode them
+      // 0x18275040: MCU_Motor_RPM
+      // 0x18265040: MCU_Motor_Temperature, sigThrottle
+      const normId = normalizeId(f.id.replace('0x', ''), true);
+      
+      if (normId === "18275040") {
+        const sig = library.database["2552713280"]?.signals["MCU_Motor_RPM"];
+        if (sig) rpm = parseFloat(decodeSignal(f.data, sig));
+      }
+      if (normId === "18265040") {
+        const tempSig = library.database["2552647744"]?.signals["MCU_Motor_Temperature"];
+        const throttleSig = library.database["2552647744"]?.signals["sigThrottle"];
+        if (tempSig) temp = parseFloat(decodeSignal(f.data, tempSig));
+        if (throttleSig) throttle = parseFloat(decodeSignal(f.data, throttleSig));
+      }
+
+      result.push({ rpm, temp, throttle, timestamp: f.timestamp });
+    }
+    return result;
+  }, [frames, library.database]);
+
   const connectSerial = async () => {
     if (!("serial" in navigator)) return;
     try {
@@ -246,7 +281,15 @@ const App: React.FC = () => {
         <div className="bg-indigo-600 p-6 rounded-[32px] text-white shadow-2xl mb-12 animate-bounce"><Cpu size={64} /></div>
         <h1 className="text-4xl md:text-8xl font-orbitron font-black text-slate-900 uppercase text-center">OSM <span className="text-indigo-600">LIVE</span></h1>
         <div className="flex flex-col gap-4 w-full max-w-xs mt-12 text-center">
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.3em] mb-4">Operator: {user.userName}</p>
+          <div className="flex flex-col items-center gap-1 mb-4">
+             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.3em]">Operator: {user.userName}</p>
+             {isAdmin && (
+               <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-100 shadow-sm mt-1">
+                 <ShieldCheck size={12} />
+                 <span className="text-[9px] font-orbitron font-black uppercase tracking-widest">ADMIN_PRIVILEGED</span>
+               </div>
+             )}
+          </div>
           <button onClick={() => setView('live')} className="w-full py-6 bg-indigo-600 text-white rounded-3xl font-orbitron font-black uppercase shadow-2xl transition-all active:scale-95">Launch HUD</button>
           <button onClick={handleLogout} className="w-full py-4 text-slate-400 font-bold uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 hover:text-red-500 transition-colors">
             <LogOut size={16} /> Terminate Terminal Session
@@ -261,11 +304,16 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen w-full flex flex-col bg-slate-50 safe-pt">
-      <header className="h-16 border-b flex items-center justify-between px-6 bg-white shrink-0">
+      <header className="h-16 border-b flex items-center justify-between px-6 bg-white shrink-0 z-[100]">
         <div className="flex items-center gap-4">
-          <button onClick={() => setView('home')} className="p-2"><ArrowLeft size={20} /></button>
+          <button onClick={() => setView('home')} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={20} /></button>
           <div className="flex flex-col">
-            <h2 className="text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
+              {isAdmin && (
+                <span className="bg-indigo-600 text-white text-[7px] font-orbitron font-black px-1.5 py-0.5 rounded leading-none">ADMIN</span>
+              )}
+            </div>
             <span className="text-[8px] text-indigo-500 font-bold uppercase tracking-widest">{user.userName} / {sessionId}</span>
           </div>
         </div>
@@ -278,7 +326,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden relative">
+      <main className="flex-1 overflow-hidden relative flex flex-col">
         {dashboardTab === 'link' ? (
           <ConnectionPanel 
             status={bridgeStatus} 
@@ -294,16 +342,24 @@ const App: React.FC = () => {
         ) : dashboardTab === 'analysis' ? (
           <TraceAnalysisDashboard frames={frames} library={library} />
         ) : dashboardTab === 'trace' ? (
-          <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} onSaveTrace={() => generateTraceFile(frames, false)} isSaving={isSaving} />
+          <div className="flex-1 flex flex-col overflow-hidden p-4 gap-4">
+             {/* Integrated Gauges for a "Complete Dashboard" feel */}
+             <div className="shrink-0">
+               <SignalGauges data={gaugeData} />
+             </div>
+             <div className="flex-1 overflow-hidden">
+               <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} onSaveTrace={() => generateTraceFile(frames, false)} isSaving={isSaving} />
+             </div>
+          </div>
         ) : (
           <LibraryPanel library={library} onUpdateLibrary={setLibrary} latestFrames={latestFrames} />
         )}
       </main>
 
-      <nav className="h-20 bg-white border-t flex items-center justify-around px-4 pb-2 shrink-0 safe-pb">
+      <nav className="h-20 bg-white border-t flex items-center justify-around px-4 pb-2 shrink-0 safe-pb z-[100]">
         {[
+            { id: 'trace', icon: LayoutDashboard, label: 'DASHBOARD' },
             { id: 'link', icon: Bluetooth, label: 'LINK' },
-            { id: 'trace', icon: Activity, label: 'HUD' },
             { id: 'library', icon: Database, label: 'DATA' },
             { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
         ].map(tab => (
