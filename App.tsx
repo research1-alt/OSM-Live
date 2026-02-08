@@ -51,40 +51,6 @@ const App: React.FC = () => {
     }
   }, []);
 
-  /**
-   * THE 5-SECOND HEARTBEAT
-   * Implements "Automatic Boot" if Cloud SID mismatches.
-   */
-  useEffect(() => {
-    if (!user || !sessionId) return;
-
-    const interval = setInterval(async () => {
-      const remoteSid = await authService.fetchRemoteSessionId(user.email);
-      if (remoteSid !== "NOT_FOUND" && remoteSid !== "ERROR" && remoteSid !== sessionId) {
-        alert("⚠️ SESSION TERMINATED:\nYour account was logged in from another device.\nAccess has been revoked locally.");
-        handleLogout();
-      }
-    }, SESSION_HEARTBEAT_INTERVAL);
-
-    return () => clearInterval(interval);
-  }, [user, sessionId]);
-
-  const handleAuth = (userData: User, sid: string) => {
-    setUser(userData);
-    setSessionId(sid);
-    localStorage.setItem('osm_currentUser', JSON.stringify(userData));
-    localStorage.setItem('osm_sid', sid);
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    setSessionId(null);
-    localStorage.removeItem('osm_currentUser');
-    localStorage.removeItem('osm_sid');
-    setView('home');
-    disconnectHardware();
-  };
-
   const frameMapRef = useRef<Map<string, CANFrame>>(new Map());
   const pendingFramesRef = useRef<CANFrame[]>([]);
   const isPausedRef = useRef(isPaused);
@@ -101,6 +67,74 @@ const App: React.FC = () => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
     setDebugLog(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
   }, []);
+
+  const disconnectHardware = useCallback(async () => {
+    keepReadingRef.current = false;
+    
+    if (serialReaderRef.current) {
+      try {
+        await serialReaderRef.current.cancel();
+      } catch (e) {
+        console.error("Error cancelling reader:", e);
+      }
+    }
+
+    if (serialPortRef.current) {
+      try {
+        await serialPortRef.current.close();
+        addDebugLog("SYS: Serial Port Closed Successfully");
+      } catch (e: any) {
+        addDebugLog(`ERROR_CLOSING_PORT: ${e.message}`);
+      }
+      serialPortRef.current = null;
+    }
+
+    if ((window as any).NativeBleBridge) (window as any).NativeBleBridge.disconnectBle();
+    setBridgeStatus('disconnected');
+    setHwStatus('offline');
+  }, [addDebugLog]);
+
+  const handleLogout = useCallback(() => {
+    setUser(null);
+    setSessionId(null);
+    localStorage.removeItem('osm_currentUser');
+    localStorage.removeItem('osm_sid');
+    setView('home');
+    disconnectHardware();
+  }, [disconnectHardware]);
+
+  /**
+   * THE 5-SECOND HEARTBEAT
+   * Implements "Automatic Boot" if Cloud SID mismatches.
+   * NOTE: Admin account (research1@omegaseikimobility.com) is specifically 
+   * permitted to have multiple concurrent sessions.
+   */
+  useEffect(() => {
+    if (!user || !sessionId) return;
+    
+    // ADMIN EXCEPTION: research1@omegaseikimobility.com is exempt from conflict detection
+    if (isAdmin) {
+      console.log("SYS: Conflict detection disabled for Admin UID.");
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      const remoteSid = await authService.fetchRemoteSessionId(user.email);
+      if (remoteSid !== "NOT_FOUND" && remoteSid !== "ERROR" && remoteSid !== sessionId) {
+        alert("⚠️ SESSION TERMINATED:\nYour account was logged in from another device.\nAccess has been revoked locally.");
+        handleLogout();
+      }
+    }, SESSION_HEARTBEAT_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [user, sessionId, isAdmin, handleLogout]);
+
+  const handleAuth = (userData: User, sid: string) => {
+    setUser(userData);
+    setSessionId(sid);
+    localStorage.setItem('osm_currentUser', JSON.stringify(userData));
+    localStorage.setItem('osm_sid', sid);
+  };
 
   const generateTraceFile = useCallback((framesToSave: CANFrame[], isAuto: boolean = false) => {
     if (!framesToSave || framesToSave.length === 0) return;
@@ -196,20 +230,14 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [generateTraceFile]);
 
-  // Extract signal values for dashboard gauges
   const gaugeData = useMemo(() => {
     const result = [];
     const windowSize = 50;
-    // We sample from frames to build a small history for the chart
     for (let i = Math.max(0, frames.length - windowSize); i < frames.length; i++) {
       const f = frames[i];
       let rpm = 0;
       let temp = 0;
       let throttle = 0;
-
-      // Logic to find specific IDs in the frame and decode them
-      // 0x18275040: MCU_Motor_RPM
-      // 0x18265040: MCU_Motor_Temperature, sigThrottle
       const normId = normalizeId(f.id.replace('0x', ''), true);
       
       if (normId === "18275040") {
@@ -222,7 +250,6 @@ const App: React.FC = () => {
         if (tempSig) temp = parseFloat(decodeSignal(f.data, tempSig));
         if (throttleSig) throttle = parseFloat(decodeSignal(f.data, throttleSig));
       }
-
       result.push({ rpm, temp, throttle, timestamp: f.timestamp });
     }
     return result;
@@ -239,10 +266,11 @@ const App: React.FC = () => {
       keepReadingRef.current = true;
       const decoder = new TextDecoder();
       let buffer = "";
+      
       while (port.readable && keepReadingRef.current) {
         serialReaderRef.current = port.readable.getReader();
         try {
-          while (true) {
+          while (keepReadingRef.current) {
             const { value, done } = await serialReaderRef.current.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
@@ -255,21 +283,20 @@ const App: React.FC = () => {
               if (parts.length >= 3) handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
             }
           }
-        } finally { serialReaderRef.current.releaseLock(); }
+        } catch (err: any) {
+          if (keepReadingRef.current) {
+            addDebugLog(`READ_ERROR: ${err.message}`);
+          }
+        } finally { 
+          serialReaderRef.current.releaseLock();
+          serialReaderRef.current = null;
+        }
       }
-    } catch (err) { setBridgeStatus('disconnected'); }
-  };
-
-  const disconnectHardware = useCallback(() => {
-    keepReadingRef.current = false;
-    if (serialPortRef.current) {
-      serialPortRef.current.close();
-      serialPortRef.current = null;
+    } catch (err: any) { 
+      setBridgeStatus('disconnected'); 
+      addDebugLog(`CONNECT_ERROR: ${err.message}`);
     }
-    if ((window as any).NativeBleBridge) (window as any).NativeBleBridge.disconnectBle();
-    setBridgeStatus('disconnected');
-    setHwStatus('offline');
-  }, []);
+  };
 
   if (!user) {
     return <AuthScreen onAuthenticated={handleAuth} />;
@@ -343,7 +370,6 @@ const App: React.FC = () => {
           <TraceAnalysisDashboard frames={frames} library={library} />
         ) : dashboardTab === 'trace' ? (
           <div className="flex-1 flex flex-col overflow-hidden p-4 gap-4">
-             {/* Integrated Gauges for a "Complete Dashboard" feel */}
              <div className="shrink-0">
                <SignalGauges data={gaugeData} />
              </div>
