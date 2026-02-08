@@ -20,7 +20,6 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [view, setView] = useState<'home' | 'live'>('home');
-  // Set default tab to 'trace' (HUD) so the user sees the dashboard immediately after login
   const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis'>('trace');
   const [hardwareMode, setHardwareMode] = useState<'pcan' | 'esp32-serial' | 'esp32-bt'>('pcan');
   const [frames, setFrames] = useState<CANFrame[]>([]);
@@ -68,6 +67,55 @@ const App: React.FC = () => {
     setDebugLog(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
   }, []);
 
+  const handleNewFrame = useCallback((id: string, dlc: number, data: string[]) => {
+    if (isPausedRef.current) return;
+    const normId = normalizeId(id, true);
+    if (!normId) return;
+    const displayId = `0x${formatIdForDisplay(normId)}`;
+    const prev = frameMapRef.current.get(normId);
+    
+    const newFrame: CANFrame = {
+      id: displayId, dlc,
+      data: data.map(d => d.toUpperCase().trim()), 
+      timestamp: performance.now(),
+      absoluteTimestamp: Date.now(),
+      direction: 'Rx',
+      count: (prev?.count || 0) + 1,
+      periodMs: prev ? Math.round(performance.now() - prev.timestamp) : 0
+    };
+    frameMapRef.current.set(normId, newFrame);
+    pendingFramesRef.current.push(newFrame);
+  }, []);
+
+  /**
+   * ANDROID NATIVE BRIDGE RECOVERY
+   * Restores Bluetooth functionality by listening to window callbacks from MainActivity.java
+   */
+  useEffect(() => {
+    (window as any).onNativeBleLog = (msg: string) => addDebugLog(`BLE: ${msg}`);
+    
+    (window as any).onNativeBleStatus = (status: string) => {
+      setBridgeStatus(status as ConnectionStatus);
+      if (status === 'connected') setHwStatus('active');
+      else setHwStatus('offline');
+    };
+
+    (window as any).onNativeBleData = (rawPacket: string) => {
+      const cleanLine = rawPacket.trim();
+      if (!cleanLine) return;
+      const parts = cleanLine.split('#');
+      if (parts.length >= 3) {
+        handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
+      }
+    };
+
+    return () => {
+      delete (window as any).onNativeBleLog;
+      delete (window as any).onNativeBleStatus;
+      delete (window as any).onNativeBleData;
+    };
+  }, [addDebugLog, handleNewFrame]);
+
   const disconnectHardware = useCallback(async () => {
     keepReadingRef.current = false;
     
@@ -89,7 +137,9 @@ const App: React.FC = () => {
       serialPortRef.current = null;
     }
 
-    if ((window as any).NativeBleBridge) (window as any).NativeBleBridge.disconnectBle();
+    if ((window as any).NativeBleBridge) {
+        (window as any).NativeBleBridge.disconnectBle();
+    }
     setBridgeStatus('disconnected');
     setHwStatus('offline');
   }, [addDebugLog]);
@@ -103,20 +153,9 @@ const App: React.FC = () => {
     disconnectHardware();
   }, [disconnectHardware]);
 
-  /**
-   * THE 5-SECOND HEARTBEAT
-   * Implements "Automatic Boot" if Cloud SID mismatches.
-   * NOTE: Admin account (research1@omegaseikimobility.com) is specifically 
-   * permitted to have multiple concurrent sessions.
-   */
   useEffect(() => {
     if (!user || !sessionId) return;
-    
-    // ADMIN EXCEPTION: research1@omegaseikimobility.com is exempt from conflict detection
-    if (isAdmin) {
-      console.log("SYS: Conflict detection disabled for Admin UID.");
-      return;
-    }
+    if (isAdmin) return;
 
     const interval = setInterval(async () => {
       const remoteSid = await authService.fetchRemoteSessionId(user.email);
@@ -185,26 +224,6 @@ const App: React.FC = () => {
       }, 2000);
     } catch (err) { setIsSaving(false); }
   }, [user, sessionId, addDebugLog]);
-
-  const handleNewFrame = useCallback((id: string, dlc: number, data: string[]) => {
-    if (isPausedRef.current) return;
-    const normId = normalizeId(id, true);
-    if (!normId) return;
-    const displayId = `0x${formatIdForDisplay(normId)}`;
-    const prev = frameMapRef.current.get(normId);
-    
-    const newFrame: CANFrame = {
-      id: displayId, dlc,
-      data: data.map(d => d.toUpperCase().trim()), 
-      timestamp: performance.now(),
-      absoluteTimestamp: Date.now(),
-      direction: 'Rx',
-      count: (prev?.count || 0) + 1,
-      periodMs: prev ? Math.round(performance.now() - prev.timestamp) : 0
-    };
-    frameMapRef.current.set(normId, newFrame);
-    pendingFramesRef.current.push(newFrame);
-  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
