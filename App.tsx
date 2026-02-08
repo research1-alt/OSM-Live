@@ -14,7 +14,7 @@ import { User, authService, SPREADSHEET_URL } from '@/services/authService';
 
 const MAX_FRAME_LIMIT = 1000000; 
 const BATCH_UPDATE_INTERVAL = 60; 
-const SESSION_HEARTBEAT_INTERVAL = 5000; // 5-second "CONFLICT DETECTION"
+const SESSION_HEARTBEAT_INTERVAL = 5000; 
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -40,7 +40,6 @@ const App: React.FC = () => {
 
   const isAdmin = useMemo(() => user ? authService.isAdmin(user.email) : false, [user]);
 
-  // Handle Session Persistence
   useEffect(() => {
     const stored = localStorage.getItem('osm_currentUser');
     const storedSid = localStorage.getItem('osm_sid');
@@ -48,19 +47,24 @@ const App: React.FC = () => {
       setUser(JSON.parse(stored));
       setSessionId(storedSid);
     }
+
+    // Diagnostic: Log Native Bridge Status
+    setTimeout(() => {
+        const isNative = !!(window as any).NativeBleBridge;
+        addDebugLog(`SYS: Native Bridge Detected: ${isNative ? 'YES' : 'NO'}`);
+    }, 2000);
   }, []);
 
   const frameMapRef = useRef<Map<string, CANFrame>>(new Map());
   const pendingFramesRef = useRef<CANFrame[]>([]);
   const isPausedRef = useRef(isPaused);
-  const currentFramesRef = useRef<CANFrame[]>([]);
+  const bleBufferRef = useRef<string>("");
   
   const serialPortRef = useRef<any>(null);
   const serialReaderRef = useRef<any>(null);
   const keepReadingRef = useRef(false);
 
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
-  useEffect(() => { currentFramesRef.current = frames; }, [frames]);
 
   const addDebugLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
@@ -89,7 +93,7 @@ const App: React.FC = () => {
 
   /**
    * ANDROID NATIVE BRIDGE RECOVERY
-   * Restores Bluetooth functionality by listening to window callbacks from MainActivity.java
+   * Refined with packet reassembly to handle potential Bluetooth fragmentation.
    */
   useEffect(() => {
     (window as any).onNativeBleLog = (msg: string) => addDebugLog(`BLE: ${msg}`);
@@ -100,12 +104,21 @@ const App: React.FC = () => {
       else setHwStatus('offline');
     };
 
-    (window as any).onNativeBleData = (rawPacket: string) => {
-      const cleanLine = rawPacket.trim();
-      if (!cleanLine) return;
-      const parts = cleanLine.split('#');
-      if (parts.length >= 3) {
-        handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
+    (window as any).onNativeBleData = (chunk: string) => {
+      // BLE frames can sometimes be fragmented; reassemble based on newlines
+      bleBufferRef.current += chunk;
+      if (bleBufferRef.current.includes('\n')) {
+        const lines = bleBufferRef.current.split('\n');
+        bleBufferRef.current = lines.pop() || "";
+        
+        for (const line of lines) {
+          const cleanLine = line.trim();
+          if (!cleanLine) continue;
+          const parts = cleanLine.split('#');
+          if (parts.length >= 3) {
+            handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
+          }
+        }
       }
     };
 
@@ -122,17 +135,15 @@ const App: React.FC = () => {
     if (serialReaderRef.current) {
       try {
         await serialReaderRef.current.cancel();
-      } catch (e) {
-        console.error("Error cancelling reader:", e);
-      }
+      } catch (e) {}
     }
 
     if (serialPortRef.current) {
       try {
         await serialPortRef.current.close();
-        addDebugLog("SYS: Serial Port Closed Successfully");
+        addDebugLog("SYS: Serial Port Closed");
       } catch (e: any) {
-        addDebugLog(`ERROR_CLOSING_PORT: ${e.message}`);
+        addDebugLog(`ERROR_CLOSING: ${e.message}`);
       }
       serialPortRef.current = null;
     }
@@ -160,7 +171,7 @@ const App: React.FC = () => {
     const interval = setInterval(async () => {
       const remoteSid = await authService.fetchRemoteSessionId(user.email);
       if (remoteSid !== "NOT_FOUND" && remoteSid !== "ERROR" && remoteSid !== sessionId) {
-        alert("⚠️ SESSION TERMINATED:\nYour account was logged in from another device.\nAccess has been revoked locally.");
+        alert("⚠️ SESSION CONFLICT:\nAccess revoked due to login on another device.");
         handleLogout();
       }
     }, SESSION_HEARTBEAT_INTERVAL);
@@ -206,7 +217,7 @@ const App: React.FC = () => {
             nativeInterface.saveFile(content, fileName);
             setIsSaving(false);
             return;
-        } catch (e) { addDebugLog(`NATIVE_ERROR: ${e}`); }
+        } catch (e) { addDebugLog(`NATIVE_SAVE_ERROR: ${e}`); }
     }
 
     try {
@@ -275,7 +286,10 @@ const App: React.FC = () => {
   }, [frames, library.database]);
 
   const connectSerial = async () => {
-    if (!("serial" in navigator)) return;
+    if (!("serial" in navigator)) {
+        addDebugLog("SYS: Serial API not supported in this browser.");
+        return;
+    }
     try {
       setBridgeStatus('connecting');
       const port = await (navigator as any).serial.requestPort();
@@ -303,9 +317,7 @@ const App: React.FC = () => {
             }
           }
         } catch (err: any) {
-          if (keepReadingRef.current) {
-            addDebugLog(`READ_ERROR: ${err.message}`);
-          }
+          if (keepReadingRef.current) addDebugLog(`SERIAL_READ_ERROR: ${err.message}`);
         } finally { 
           serialReaderRef.current.releaseLock();
           serialReaderRef.current = null;
@@ -313,13 +325,11 @@ const App: React.FC = () => {
       }
     } catch (err: any) { 
       setBridgeStatus('disconnected'); 
-      addDebugLog(`CONNECT_ERROR: ${err.message}`);
+      addDebugLog(`SERIAL_ERROR: ${err.message}`);
     }
   };
 
-  if (!user) {
-    return <AuthScreen onAuthenticated={handleAuth} />;
-  }
+  if (!user) return <AuthScreen onAuthenticated={handleAuth} />;
 
   if (view === 'home') {
     return (
@@ -338,7 +348,7 @@ const App: React.FC = () => {
           </div>
           <button onClick={() => setView('live')} className="w-full py-6 bg-indigo-600 text-white rounded-3xl font-orbitron font-black uppercase shadow-2xl transition-all active:scale-95">Launch HUD</button>
           <button onClick={handleLogout} className="w-full py-4 text-slate-400 font-bold uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 hover:text-red-500 transition-colors">
-            <LogOut size={16} /> Terminate Terminal Session
+            <LogOut size={16} /> Terminate Session
           </button>
           <a href={SPREADSHEET_URL} target="_blank" rel="noopener noreferrer" className="mt-8 text-[8px] text-slate-300 font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:text-indigo-400 transition-colors">
             <ExternalLink size={10} /> View Cloud Registry
@@ -356,18 +366,12 @@ const App: React.FC = () => {
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
               <h2 className="text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
-              {isAdmin && (
-                <span className="bg-indigo-600 text-white text-[7px] font-orbitron font-black px-1.5 py-0.5 rounded leading-none">ADMIN</span>
-              )}
+              {isAdmin && <span className="bg-indigo-600 text-white text-[7px] font-orbitron font-black px-1.5 py-0.5 rounded leading-none">ADMIN</span>}
             </div>
             <span className="text-[8px] text-indigo-500 font-bold uppercase tracking-widest">{user.userName} / {sessionId}</span>
           </div>
         </div>
         <div className="flex items-center gap-4">
-           <div className="hidden md:flex flex-col items-end">
-              <span className="text-[7px] font-black text-slate-400 uppercase">Security_Heartbeat</span>
-              <span className="text-[8px] font-bold text-emerald-500 uppercase animate-pulse">Synchronized</span>
-           </div>
            <div className={`w-3 h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-300'}`} />
         </div>
       </header>
@@ -381,7 +385,11 @@ const App: React.FC = () => {
             onSetHardwareMode={setHardwareMode} 
             baudRate={baudRate} 
             setBaudRate={setBaudRate}
-            onConnect={() => hardwareMode === 'esp32-serial' ? connectSerial() : (window as any).NativeBleBridge?.startBleLink()} 
+            onConnect={() => {
+                if (hardwareMode === 'esp32-serial') connectSerial();
+                else if (hardwareMode === 'esp32-bt') (window as any).NativeBleBridge?.startBleLink();
+                else addDebugLog("SYS: Selected mode requires external bridge.");
+            }} 
             onDisconnect={disconnectHardware} 
             debugLog={debugLog}
           />
