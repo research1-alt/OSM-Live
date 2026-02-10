@@ -41,16 +41,15 @@ const App: React.FC = () => {
   const isAdmin = useMemo(() => user ? authService.isAdmin(user.email) : false, [user]);
   const prevBridgeStatus = useRef<ConnectionStatus>('disconnected');
 
-  // NAVIGATION CONTROL: Only auto-redirect to Trace once upon connection
   useEffect(() => {
     if (bridgeStatus === 'connected' && prevBridgeStatus.current !== 'connected') {
       setDashboardTab('trace');
     }
     if (bridgeStatus !== 'connected' && dashboardTab !== 'link') {
-      setDashboardTab('link');
+      // Stay on Link if error occurred
     }
     prevBridgeStatus.current = bridgeStatus;
-  }, [bridgeStatus]);
+  }, [bridgeStatus, dashboardTab]);
 
   useEffect(() => {
     const stored = localStorage.getItem('osm_currentUser');
@@ -98,10 +97,11 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    (window as any).onNativeBleLog = (msg: string) => addDebugLog(`BLE: ${msg}`);
+    (window as any).onNativeBleLog = (msg: string) => addDebugLog(`BRIDGE: ${msg}`);
     (window as any).onNativeBleStatus = (status: string) => {
       setBridgeStatus(status as ConnectionStatus);
       if (status === 'connected') setHwStatus('active');
+      else if (status === 'error') setHwStatus('fault');
       else setHwStatus('offline');
     };
     (window as any).onNativeBleData = (chunk: string) => {
@@ -140,6 +140,7 @@ const App: React.FC = () => {
     }
     setBridgeStatus('disconnected');
     setHwStatus('offline');
+    addDebugLog("SYS: Hardware Link Offline.");
   }, [addDebugLog]);
 
   const handleLogout = useCallback(() => {
@@ -259,14 +260,19 @@ const App: React.FC = () => {
     return result;
   }, [frames, library.database]);
 
-  const connectSerial = async () => {
-    if (!("serial" in navigator)) { return; }
+  const connectSerial = async (pcan: boolean = false) => {
+    if (!("serial" in navigator)) { 
+        addDebugLog("ERROR: Web Serial API not supported in this browser.");
+        return; 
+    }
     try {
       setBridgeStatus('connecting');
+      addDebugLog(`SYS: Initiating ${pcan ? 'PCAN' : 'Serial'} Handshake...`);
       const port = await (navigator as any).serial.requestPort();
-      await port.open({ baudRate });
+      await port.open({ baudRate: pcan ? 500000 : baudRate });
       serialPortRef.current = port;
       setBridgeStatus('connected');
+      addDebugLog("SYS: Link Established.");
       keepReadingRef.current = true;
       const decoder = new TextDecoder();
       let buffer = "";
@@ -286,21 +292,26 @@ const App: React.FC = () => {
               if (parts.length >= 3) handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
             }
           }
-        } catch (err: any) {} finally { 
+        } catch (err: any) {
+            addDebugLog(`SERIAL_ERROR: ${err.message}`);
+        } finally { 
           serialReaderRef.current.releaseLock();
           serialReaderRef.current = null;
         }
       }
-    } catch (err: any) { setBridgeStatus('disconnected'); }
+    } catch (err: any) { 
+        setBridgeStatus('disconnected'); 
+        addDebugLog(`AUTH_ERROR: ${err.message}`);
+    }
   };
 
   const initiateBleConnection = useCallback(() => {
     setBridgeStatus('connecting');
-    addDebugLog("SYS: Initializing BLE Link...");
+    addDebugLog("SYS: Requesting Native BLE Scan...");
     if ((window as any).NativeBleBridge) {
       (window as any).NativeBleBridge.startBleLink();
     } else {
-      addDebugLog("ERROR: Native Bridge unavailable.");
+      addDebugLog("ERROR: Native Bridge (BLE) is unavailable on this host.");
       setBridgeStatus('error');
     }
   }, [addDebugLog]);
@@ -353,7 +364,7 @@ const App: React.FC = () => {
                  <Settings2 size={10} /> Link_Settings
                </button>
            )}
-           <div className={`w-2.5 h-2.5 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-slate-300'}`} />
+           <div className={`w-2.5 h-2.5 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : bridgeStatus === 'error' ? 'bg-red-500 shadow-[0_0_8px_#ef4444]' : 'bg-slate-300'}`} />
         </div>
       </header>
 
@@ -369,6 +380,7 @@ const App: React.FC = () => {
             onConnect={() => {
                 if (hardwareMode === 'esp32-serial') connectSerial();
                 else if (hardwareMode === 'esp32-bt') initiateBleConnection();
+                else if (hardwareMode === 'pcan') connectSerial(true);
             }} 
             onDisconnect={disconnectHardware} 
             debugLog={debugLog}
