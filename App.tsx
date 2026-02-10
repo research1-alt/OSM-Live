@@ -40,17 +40,23 @@ const App: React.FC = () => {
   });
 
   const isAdmin = useMemo(() => user ? authService.isAdmin(user.email) : false, [user]);
+  const prevBridgeStatus = useRef<ConnectionStatus>('disconnected');
 
-  // REDIRECT LOGIC: If connection drops, force user back to LINK tab
+  // REDIRECT LOGIC: Only auto-redirect once upon connection or disconnection
   useEffect(() => {
+    // 1. If connection drops, force user back to LINK tab
     if (bridgeStatus !== 'connected' && dashboardTab !== 'link') {
       setDashboardTab('link');
     }
-    // AUTOMATIC ROUTING: If we just connected and were on the 'link' tab, move to 'trace'
-    if (bridgeStatus === 'connected' && dashboardTab === 'link') {
+    
+    // 2. AUTOMATIC ROUTING: If we JUST transitioned to 'connected', move to 'trace'
+    // This only happens on the transition, allowing the user to click back to 'link' manually later.
+    if (bridgeStatus === 'connected' && prevBridgeStatus.current !== 'connected') {
         setDashboardTab('trace');
     }
-  }, [bridgeStatus, dashboardTab]);
+    
+    prevBridgeStatus.current = bridgeStatus;
+  }, [bridgeStatus]);
 
   useEffect(() => {
     const stored = localStorage.getItem('osm_currentUser');
@@ -374,12 +380,10 @@ const App: React.FC = () => {
               <h2 className="text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
               {isAdmin && <span className="bg-indigo-600 text-white text-[7px] font-orbitron font-black px-1.5 py-0.5 rounded leading-none">ADMIN</span>}
             </div>
-            {/* SESSION_ID DISPLAY REMOVED PER USER REQUEST */}
             <span className="text-[8px] text-indigo-500 font-bold uppercase tracking-widest">{user.userName}</span>
           </div>
         </div>
         <div className="flex items-center gap-3">
-           {/* GO BACK OPTION: Show settings button when connected to allow switching hardware */}
            {bridgeStatus === 'connected' && (
                <button 
                  onClick={() => setDashboardTab('link')} 
@@ -433,12 +437,9 @@ const App: React.FC = () => {
             { id: 'library', icon: Database, label: 'DATA' },
             { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
         ].filter(tab => {
-          // DYNAMIC NAVIGATION:
-          // 1. If not connected, ONLY show LINK tab
           if (bridgeStatus !== 'connected') {
             return tab.id === 'link';
           }
-          // 2. If connected, HIDE the LINK tab from the bottom nav (it's in the header now)
           return tab.id !== 'link';
         }).map(tab => (
             <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1.5 px-4 py-2 rounded-2xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400 hover:text-indigo-400'}`}>
