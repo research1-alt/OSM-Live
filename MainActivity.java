@@ -145,10 +145,23 @@ public class MainActivity extends AppCompatActivity {
     @SuppressWarnings("unused")
     public class NativeBleBridge {
         @JavascriptInterface
+        public void openBluetoothSettings() {
+            runOnUiThread(() -> {
+                Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+                sendToJs("MANUAL_RESET: Toggle Bluetooth in System Settings to clear handles.");
+            });
+        }
+
+        @JavascriptInterface
         public void startBleLink() {
             runOnUiThread(() -> {
                 if (recoveryActive) return;
                 
+                // Refresh Adapter
+                initBluetooth();
+
                 if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
                     Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
                     if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
@@ -157,18 +170,21 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                // STEP 1: Aggressively release existing scanner handles
+                // STEP 1: Flush all existing handles
                 cleanupScanner();
+                cleanupGatt();
+                
                 recoveryActive = true;
-                sendToJs("SYS_RESET: Flushing Bluetooth Stack...");
+                sendToJs("RECOVERY_INIT: Purging System Bt Stack Handles...");
 
-                // STEP 2: Wait for OS to reclaim the registration handle (Mandatory for Code 2 fix)
+                // STEP 2: Delay for OS reclamation
                 mainHandler.postDelayed(() -> {
                     recoveryActive = false;
                     bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
                     
                     if (bluetoothLeScanner == null) {
-                        sendToJs("CRITICAL_ERROR: Bluetooth Controller busy. Restart Bluetooth.");
+                        sendToJs("ERROR: Registration Fail. System Stack saturated (Code 2). Use Manual Toggle.");
+                        evaluateJs("window.onNativeBleStatus('error')");
                         return;
                     }
 
@@ -181,27 +197,27 @@ public class MainActivity extends AppCompatActivity {
                         try {
                             isScanning = true;
                             bluetoothLeScanner.startScan(null, settings, scanCallback);
-                            sendToJs("SCANNING: Seeking Tactical Bridge...");
+                            sendToJs("SCANNING: Hunting for OSM hardware...");
                             
                             mainHandler.removeCallbacksAndMessages(null);
                             mainHandler.postDelayed(() -> {
                                 if (isScanning) {
                                     cleanupScanner();
-                                    sendToJs("TIMEOUT: No device found.");
+                                    sendToJs("TIMEOUT: Bridge not detected in 20s.");
                                     evaluateJs("window.onNativeBleStatus('disconnected')");
                                 }
-                            }, 30000);
+                            }, 20000);
                         } catch (Exception e) {
                             isScanning = false;
                             sendToJs("EXCEPTION: " + e.getMessage());
                         }
                     }
-                }, 1500); // Increased delay for stack stability
+                }, 2000); // 2 second delay for hard stack clear
             });
         }
 
         private void cleanupScanner() {
-            if (bluetoothLeScanner != null) {
+            if (bluetoothLeScanner != null && isScanning) {
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
                     try { bluetoothLeScanner.stopScan(scanCallback); } catch (Exception ignored) {}
                 }
@@ -210,19 +226,25 @@ public class MainActivity extends AppCompatActivity {
             isScanning = false;
         }
 
+        private void cleanupGatt() {
+            if (bluetoothGatt != null) {
+                if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                    try {
+                        bluetoothGatt.disconnect();
+                        bluetoothGatt.close();
+                    } catch (Exception ignored) {}
+                }
+                bluetoothGatt = null;
+            }
+        }
+
         @JavascriptInterface
         public void disconnectBle() {
             runOnUiThread(() -> {
                 cleanupScanner();
-                if (bluetoothGatt != null) {
-                    if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                        bluetoothGatt.disconnect();
-                        bluetoothGatt.close();
-                        bluetoothGatt = null;
-                        sendToJs("STATE: Bridge Offline.");
-                        evaluateJs("window.onNativeBleStatus('disconnected')");
-                    }
-                }
+                cleanupGatt();
+                sendToJs("STATE: Link Purged.");
+                evaluateJs("window.onNativeBleStatus('disconnected')");
             });
         }
     }
@@ -234,8 +256,8 @@ public class MainActivity extends AppCompatActivity {
             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                 String name = device.getName();
                 if (name != null && (name.contains("OSM") || name.contains("ESP32") || name.contains("CAN"))) {
-                    sendToJs("MATCH: " + name + " found. Initializing link...");
-                    new NativeBleBridge().cleanupScanner(); // STOP IMMEDIATELY TO FREE SCANNER SLOT
+                    sendToJs("MATCH: Target " + name + " found.");
+                    new NativeBleBridge().cleanupScanner(); 
                     connectToDevice(device);
                 }
             }
@@ -244,9 +266,12 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onScanFailed(int errorCode) {
             isScanning = false;
-            String msg = (errorCode == SCAN_FAILED_APPLICATION_REGISTRATION_FAILED) 
-                ? "REGISTRATION_FAILURE (CODE 2): System Bluetooth stack full. Manual Reset Required."
-                : "SCAN_FAILED: Code " + errorCode;
+            String msg;
+            if (errorCode == SCAN_FAILED_APPLICATION_REGISTRATION_FAILED) {
+                msg = "REG_ERROR: Code 2 Saturated. Manual Toggle Required.";
+            } else {
+                msg = "SCAN_FAIL: " + errorCode;
+            }
             sendToJs("ERROR: " + msg);
             evaluateJs("window.onNativeBleStatus('error')");
         }
@@ -262,7 +287,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                sendToJs("LINK: Handshake started.");
+                sendToJs("LINK: Authenticating GATT...");
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                     mainHandler.postDelayed(() -> {
                         if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
@@ -302,7 +327,7 @@ public class MainActivity extends AppCompatActivity {
                             if (descriptor != null) {
                                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                                 gatt.writeDescriptor(descriptor);
-                                sendToJs("STREAM_ACTIVE: Receiving CAN frames.");
+                                sendToJs("BRIDGE: Live stream active.");
                                 evaluateJs("window.onNativeBleStatus('connected')");
                             }
                         }
