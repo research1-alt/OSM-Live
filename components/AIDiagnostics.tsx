@@ -1,7 +1,9 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { CANFrame, SignalAnalysis } from '../types.ts';
 import { analyzeCANData } from '../services/geminiService.ts';
 import { AlertCircle, BrainCircuit, ExternalLink, Loader2, CheckCircle2, Unlock, Lock, ArrowDownToLine } from 'lucide-react';
+import { User } from '../services/authService.ts';
 
 interface AIDiagnosticsProps {
   currentFrames: CANFrame[];
@@ -24,8 +26,16 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ currentFrames }) => {
     if (currentFrames.length === 0) return;
     setLoading(true);
     setError(null);
+    
+    // Retrieve operator metadata from localStorage for logging
+    // Fixed: Using correct key 'osm_currentUser' as defined in App.tsx session persistence
+    const storedUser = localStorage.getItem('osm_currentUser');
+    const storedSid = localStorage.getItem('osm_sid');
+    const user: User | undefined = storedUser ? JSON.parse(storedUser) : undefined;
+    const sid: string | undefined = storedSid || undefined;
+
     try {
-      const result = await analyzeCANData(currentFrames);
+      const result = await analyzeCANData(currentFrames, user, sid);
       setAnalysis(result);
     } catch (err) {
       setError("Failed to generate AI analysis. Please check your API key.");
@@ -51,7 +61,6 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ currentFrames }) => {
           <button
             onClick={() => setAutoScroll(!autoScroll)}
             className={`p-1.5 rounded border transition-all shadow-sm ${autoScroll ? 'bg-indigo-600 border-indigo-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-400'}`}
-            title={autoScroll ? "Disable Auto-Scroll" : "Enable Auto-Scroll"}
           >
             {autoScroll ? <Unlock size={12} /> : <Lock size={12} />}
           </button>
@@ -66,10 +75,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ currentFrames }) => {
         </div>
       </div>
 
-      <div 
-        ref={contentRef}
-        className="flex-1 overflow-y-auto pr-3 custom-scrollbar min-h-0 space-y-6 relative"
-      >
+      <div ref={contentRef} className="flex-1 overflow-y-auto pr-3 custom-scrollbar min-h-0 space-y-6 relative">
         {loading && (
           <div className="flex flex-col items-center justify-center h-48 space-y-4">
             <div className="relative">

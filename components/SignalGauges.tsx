@@ -6,11 +6,13 @@ interface SignalGaugesProps {
   data: { rpm: number; temp: number; throttle: number; timestamp: number }[];
 }
 
-const Gauge: React.FC<{ label: string; value: string | number; unit: string; color: string }> = ({ label, value, unit, color }) => (
-  <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col items-center justify-center space-y-2">
-    <span className="text-slate-400 text-xs font-semibold uppercase">{label}</span>
-    <span className={`text-3xl font-bold ${color}`}>{value}</span>
-    <span className="text-slate-500 text-xs">{unit}</span>
+const Gauge: React.FC<{ label: string; value: string | number; unit: string; color: string; bgColor: string }> = ({ label, value, unit, color, bgColor }) => (
+  <div className={`${bgColor} p-3 rounded-2xl border border-slate-100 flex flex-col items-center justify-center shadow-sm`}>
+    <span className="text-slate-400 text-[8px] font-black uppercase tracking-widest mb-1">{label}</span>
+    <div className="flex items-baseline gap-1">
+      <span className={`text-xl font-orbitron font-black ${color}`}>{value}</span>
+      <span className="text-[7px] text-slate-400 font-bold uppercase">{unit}</span>
+    </div>
   </div>
 );
 
@@ -18,23 +20,27 @@ const SignalGauges: React.FC<SignalGaugesProps> = ({ data }) => {
   const latest = data[data.length - 1] || { rpm: 0, temp: 0, throttle: 0 };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <Gauge label="Engine Speed" value={latest.rpm} unit="RPM" color="text-emerald-400" />
-      <Gauge label="Coolant Temp" value={latest.temp} unit="°C" color="text-amber-400" />
-      <Gauge label="Throttle" value={latest.throttle} unit="%" color="text-blue-400" />
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-3 gap-3">
+        <Gauge label="Motor Speed" value={Math.round(latest.rpm)} unit="RPM" color="text-indigo-600" bgColor="bg-indigo-50/30" />
+        <Gauge label="Core Temp" value={latest.temp.toFixed(1)} unit="°C" color="text-amber-600" bgColor="bg-amber-50/30" />
+        <Gauge label="Throttle" value={Math.round(latest.throttle)} unit="%" color="text-emerald-600" bgColor="bg-emerald-50/30" />
+      </div>
       
-      <div className="md:col-span-3 bg-slate-800 p-4 rounded-xl border border-slate-700 h-64">
-        <h3 className="text-slate-300 text-sm font-bold mb-4">Live Waveform (RPM)</h3>
+      <div className="bg-white p-3 rounded-2xl border border-slate-200 h-32 shadow-sm relative overflow-hidden">
+        <div className="absolute top-2 left-3 z-10">
+          <h3 className="text-slate-400 text-[7px] font-black uppercase tracking-widest">Live_Waveform (RPM)</h3>
+        </div>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data.slice(-50)}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis hide dataKey="timestamp" />
-            <YAxis stroke="#64748b" fontSize={10} domain={[0, 8000]} />
+            <YAxis hide domain={[0, 'auto']} />
             <Tooltip 
-              contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px' }}
-              labelStyle={{ color: '#94a3b8' }}
+              contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', border: 'none', borderRadius: '12px', fontSize: '9px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+              labelStyle={{ display: 'none' }}
             />
-            <Line type="monotone" dataKey="rpm" stroke="#10b981" strokeWidth={2} dot={false} isAnimationActive={false} />
+            <Line type="monotone" dataKey="rpm" stroke="#4f46e5" strokeWidth={3} dot={false} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>

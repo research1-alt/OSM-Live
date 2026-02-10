@@ -55,15 +55,6 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({ frames,
 
   return (
     <div className="flex flex-col lg:flex-row h-full w-full bg-white overflow-hidden lg:rounded-xl">
-      {/* Mobile Filter Toggle */}
-      <div className="lg:hidden p-4 border-b flex justify-between items-center bg-slate-50 shrink-0">
-          <h3 className="text-[10px] font-orbitron font-black text-slate-800 uppercase tracking-widest">Analysis HUD</h3>
-          <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[9px] font-orbitron font-black uppercase border transition-all ${showFilters ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white border-slate-200 text-slate-500'}`}>
-              <Filter size={14} /> Signals
-          </button>
-      </div>
-
-      {/* Side/Mobile Filter Panel */}
       <div className={`${showFilters ? 'fixed inset-0 z-[80] bg-white' : 'hidden'} lg:flex lg:relative lg:flex-col bg-slate-50 shrink-0 border-r border-slate-200 lg:w-72`}>
         <div className="p-4 border-b border-slate-200 bg-slate-100/50 shrink-0 flex justify-between items-center lg:block">
           <h3 className="text-[10px] font-orbitron font-black text-indigo-600 uppercase tracking-widest flex items-center gap-2">
@@ -74,15 +65,15 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({ frames,
         <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
           {signalGroups.map(group => (
             <div key={group.id} className="mb-1">
-              <button onClick={() => setExpandedGroups(prev => prev.includes(group.id) ? prev.filter(g => g !== group.id) : [...prev, group.id])} className="w-full flex items-center gap-2 px-3 py-3 lg:py-1.5 hover:bg-white rounded text-left transition-colors group">
+              <button onClick={() => setExpandedGroups(prev => prev.includes(group.id) ? prev.filter(g => g !== group.id) : [...prev, group.id])} className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-white rounded text-left transition-colors group">
                 {expandedGroups.includes(group.id) ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
-                <span className="text-[11px] lg:text-[10px] font-bold text-slate-700 group-hover:text-indigo-600 uppercase truncate">{group.name}</span>
+                <span className="text-[10px] font-bold text-slate-700 group-hover:text-indigo-600 uppercase truncate">{group.name}</span>
               </button>
               {expandedGroups.includes(group.id) && (
-                <div className="ml-6 space-y-2 lg:space-y-1 mt-1 border-l border-slate-200 pl-3">
+                <div className="ml-6 space-y-1 mt-1 border-l border-slate-200 pl-3">
                   {group.signals.map(sig => (
-                    <button key={sig} onClick={() => setSelectedSignalNames(prev => prev.includes(sig) ? prev.filter(s => s !== sig) : [...prev, sig])} className={`w-full flex items-center gap-3 px-3 py-3 lg:py-1 rounded text-left text-[11px] lg:text-[9px] transition-all ${selectedSignalNames.includes(sig) ? 'text-indigo-600 bg-indigo-50 font-black' : 'text-slate-400 hover:text-slate-600 font-medium'}`}>
-                      <div className={`w-3 h-3 lg:w-2 lg:h-2 rounded-sm border ${selectedSignalNames.includes(sig) ? 'bg-indigo-600 border-indigo-500' : 'border-slate-300'}`} />
+                    <button key={sig} onClick={() => setSelectedSignalNames(prev => prev.includes(sig) ? prev.filter(s => s !== sig) : [...prev, sig])} className={`w-full flex items-center gap-2 px-3 py-1 rounded text-left text-[9px] transition-all ${selectedSignalNames.includes(sig) ? 'text-indigo-600 bg-indigo-50 font-black' : 'text-slate-400 hover:text-slate-600 font-medium'}`}>
+                      <div className={`w-2 h-2 rounded-sm border ${selectedSignalNames.includes(sig) ? 'bg-indigo-600 border-indigo-500' : 'border-slate-300'}`} />
                       {sig}
                     </button>
                   ))}
@@ -93,13 +84,11 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({ frames,
         </div>
       </div>
 
-      {/* Main Visualizer Area */}
       <div className="flex-1 flex flex-col min-w-0 bg-white relative overflow-hidden">
          <div className="flex-1 overflow-hidden">
              <SignalVisualizer logData={plotData} availableSignals={selectedSignalNames} library={library} fullMode={true} />
          </div>
 
-         {/* Stats Drawer (Bottom on Mobile, Side on Desktop) */}
          <div className="lg:w-[350px] lg:border-l lg:bg-slate-50 bg-white border-t p-4 shrink-0 max-h-[40vh] overflow-y-auto lg:max-h-none">
             <div className="flex items-center justify-between mb-4">
                <div className="flex gap-2">

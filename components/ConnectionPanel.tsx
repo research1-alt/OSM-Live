@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Zap, Cpu, Loader2, Bluetooth, Cable, Globe } from 'lucide-react';
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { Zap, Cpu, Loader2, Bluetooth, Cable, Globe, AlertCircle, Info } from 'lucide-react';
 import { ConnectionStatus, HardwareStatus } from '../types.ts';
 
 interface ConnectionPanelProps {
@@ -32,12 +33,36 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   }, []);
 
   const isScanning = status === 'connecting' && hardwareMode === 'esp32-bt';
-  const hasError = debugLog.some(log => log.includes('ERROR') || log.includes('STATE_ERROR'));
+  
+  // Extract the latest relevant status or error message from logs
+  const latestReason = useMemo(() => {
+    if (debugLog.length === 0) return null;
+    
+    // Look for the most recent error or state change
+    const relevantLog = debugLog.find(log => 
+      log.includes('ERROR') || 
+      log.includes('STATE') || 
+      log.includes('INIT') || 
+      log.includes('LINK') ||
+      log.includes('GATT')
+    );
+
+    if (!relevantLog) return null;
+
+    // Strip timestamp [HH:MM:SS] if present
+    const cleanLog = relevantLog.replace(/^\[.*?\]\s*/, '');
+    const isError = cleanLog.includes('ERROR') || cleanLog.includes('denied') || cleanLog.includes('OFF');
+    
+    return {
+      text: cleanLog,
+      isError
+    };
+  }, [debugLog]);
+
+  const hasError = latestReason?.isError;
 
   return (
     <div className="flex flex-col items-center justify-center w-full h-full max-w-5xl mx-auto py-10 px-4 overflow-y-auto">
-      {/* Link Console removed from UI - logic still runs in background via debugLog prop if needed */}
-      
       <div className="w-full max-w-xl">
         <div className="glass-panel border border-slate-200 bg-white rounded-[40px] p-8 lg:p-12 shadow-2xl flex flex-col justify-between min-h-[450px]">
           <div>
@@ -48,12 +73,12 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                 </h3>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Unified Hardware Bridge</p>
               </div>
-              <div className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest ${status === 'connected' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+              <div className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest ${status === 'connected' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : status === 'error' || hasError ? 'bg-red-50 text-red-600 border-red-100' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
                 {status}
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 mb-10">
+            <div className="grid grid-cols-3 gap-4 mb-8">
               <button 
                 onClick={() => onSetHardwareMode('pcan')} 
                 className={`flex flex-col items-center gap-3 p-5 rounded-[24px] border transition-all ${hardwareMode === 'pcan' ? 'bg-indigo-600 border-indigo-700 text-white shadow-xl scale-105' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'}`}
@@ -78,6 +103,25 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                 <span className="text-[9px] font-orbitron font-black uppercase">BLE</span>
               </button>
             </div>
+
+            {/* Hardware Status / Error Reason Display */}
+            {status !== 'connected' && latestReason && (
+              <div className={`mb-10 p-4 rounded-2xl border flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-300 ${latestReason.isError ? 'bg-red-50 border-red-100' : 'bg-indigo-50 border-indigo-100'}`}>
+                {latestReason.isError ? (
+                  <AlertCircle size={18} className="text-red-500 shrink-0 mt-0.5" />
+                ) : (
+                  <Info size={18} className="text-indigo-500 shrink-0 mt-0.5" />
+                )}
+                <div className="flex flex-col gap-1">
+                  <p className={`text-[10px] font-black uppercase tracking-widest ${latestReason.isError ? 'text-red-700' : 'text-indigo-700'}`}>
+                    {latestReason.isError ? 'Connection_Failure' : 'Hardware_Report'}
+                  </p>
+                  <p className={`text-[11px] font-mono leading-relaxed ${latestReason.isError ? 'text-red-600' : 'text-indigo-600'}`}>
+                    {latestReason.text}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-4">
