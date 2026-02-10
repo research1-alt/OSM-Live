@@ -91,7 +91,6 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
         if (userOtpInput === generatedOtp) {
           if (sourceMode === 'forgot') {
             setMode('reset');
-            // Reset passwords for the reset phase
             setPassword('');
             setConfirmPassword('');
           } else if (sourceMode === 'signup') {
@@ -133,6 +132,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
         
         alert('SUCCESS: Credentials updated. Proceeding to Login.');
         setMode('login');
+        resetFields();
       }
     } catch (err: any) {
       setError(`Signal Error: ${err.message}`);
@@ -184,7 +184,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
                 <div className="relative">
                   <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input 
-                    type="text" placeholder="Full Name" value={userName} onChange={e => setUserName(groupName => e.target.value)}
+                    type="text" placeholder="Full Name" value={userName} onChange={e => setUserName(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 py-4 pl-12 pr-4 rounded-2xl text-[12px] font-bold tracking-widest focus:ring-2 ring-indigo-500/20 outline-none" required 
                   />
                 </div>

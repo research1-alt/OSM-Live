@@ -17,8 +17,20 @@ const MAX_FRAME_LIMIT = 50000;
 const BATCH_UPDATE_INTERVAL = 60; 
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  // Initialize state from localStorage to prevent auto-logout
+  const [user, setUser] = useState<User | null>(() => {
+    const savedUser = localStorage.getItem('osm_currentUser');
+    try {
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch {
+      return null;
+    }
+  });
+  
+  const [sessionId, setSessionId] = useState<string | null>(() => {
+    return localStorage.getItem('osm_sid');
+  });
+
   const [view, setView] = useState<'home' | 'live'>('home');
   const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis'>('link');
   const [hardwareMode, setHardwareMode] = useState<'pcan' | 'esp32-serial' | 'esp32-bt'>('pcan');
@@ -217,7 +229,15 @@ const App: React.FC = () => {
     disconnectHardware();
   };
 
-  if (!user) return <AuthScreen onAuthenticated={(u, s) => { setUser(u); setSessionId(s); }} />;
+  // Persist session to localStorage when user logs in
+  const handleAuthenticated = (u: User, s: string) => {
+    localStorage.setItem('osm_currentUser', JSON.stringify(u));
+    localStorage.setItem('osm_sid', s);
+    setUser(u);
+    setSessionId(s);
+  };
+
+  if (!user) return <AuthScreen onAuthenticated={handleAuthenticated} />;
 
   if (view === 'home') {
     return (
