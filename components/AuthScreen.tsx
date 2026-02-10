@@ -3,25 +3,30 @@ import React, { useState } from 'react';
 import { authService, User, ALLOWED_DOMAIN, SPREADSHEET_ID } from '../services/authService.ts';
 import { otpService } from '../services/otpService.ts';
 import { hashPassword, generateSessionId } from '../utils/crypto.ts';
-import { ShieldCheck, Lock, Mail, Smartphone, User as UserIcon, Loader2, ArrowRight, ShieldAlert, KeyRound, Fingerprint, RefreshCcw } from 'lucide-react';
+import { ShieldCheck, Lock, Mail, Smartphone, User as UserIcon, Loader2, ArrowRight, ShieldAlert, KeyRound, Fingerprint, RefreshCcw, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
 interface AuthScreenProps {
   onAuthenticated: (user: User, sessionId: string) => void;
 }
 
-type AuthMode = 'login' | 'signup' | 'verify';
+type AuthMode = 'login' | 'signup' | 'verify' | 'forgot' | 'reset';
 
 const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
   const [mode, setMode] = useState<AuthMode>('login');
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [userName, setUserName] = useState('');
   const [mobile, setMobile] = useState('');
   const [error, setError] = useState('');
   
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  
   const [generatedOtp, setGeneratedOtp] = useState('');
   const [userOtpInput, setUserOtpInput] = useState('');
+  const [sourceMode, setSourceMode] = useState<AuthMode>('login');
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,40 +56,98 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
             setError('Access Denied: Invalid operator credentials.');
           }
         }
-      } else if (mode === 'signup') {
+      } else if (mode === 'signup' || mode === 'forgot') {
         if (!normalizedEmail.endsWith(ALLOWED_DOMAIN)) {
           setError(`Access Limited: Use ${ALLOWED_DOMAIN}`);
           setLoading(false);
           return;
         }
 
+        if (mode === 'signup' && password !== confirmPassword) {
+          setError('Mismatch: Passwords do not match.');
+          setLoading(false);
+          return;
+        }
+
+        // Check if user exists for forgot password
+        if (mode === 'forgot') {
+          const cloudUser = await authService.fetchUserFromCloud(normalizedEmail);
+          if (!cloudUser || !cloudUser.success) {
+            setError('User record not found in central registry.');
+            setLoading(false);
+            return;
+          }
+          setUserName(cloudUser.user.userName);
+          setMobile(cloudUser.user.mobile);
+        }
+
         const otp = Math.floor(1000 + Math.random() * 9000).toString();
         setGeneratedOtp(otp);
+        setSourceMode(mode);
 
-        await otpService.dispatchOtp(normalizedEmail, otp, userName, mobile);
+        await otpService.dispatchOtp(normalizedEmail, otp, mode === 'forgot' ? 'Operator' : userName, mode === 'forgot' ? 'N/A' : mobile);
         setMode('verify');
       } else if (mode === 'verify') {
         if (userOtpInput === generatedOtp) {
-          const hashedPassword = await hashPassword(password);
-          const newUser = { email: normalizedEmail, userName, mobile, password: hashedPassword };
-          
-          await authService.registerUserInCloud(newUser);
-          
-          const localUsers = JSON.parse(localStorage.getItem('osm_users') || '[]');
-          localUsers.push(newUser);
-          localStorage.setItem('osm_users', JSON.stringify(localUsers));
-          
-          alert('VERIFIED: Please use your credentials to login.');
-          setMode('login');
+          if (sourceMode === 'forgot') {
+            setMode('reset');
+            // Reset passwords for the reset phase
+            setPassword('');
+            setConfirmPassword('');
+          } else if (sourceMode === 'signup') {
+            // Commit user for signup
+            const hashedPassword = await hashPassword(password);
+            const newUser = { email: normalizedEmail, userName, mobile, password: hashedPassword };
+            await authService.registerUserInCloud(newUser);
+            
+            const localUsers = JSON.parse(localStorage.getItem('osm_users') || '[]');
+            localUsers.push(newUser);
+            localStorage.setItem('osm_users', JSON.stringify(localUsers));
+            
+            alert('REGISTRATION_COMPLETE: Access Authorized. Please log in.');
+            setMode('login');
+          }
         } else {
           setError('Mismatch: Invalid Access Code.');
         }
+      } else if (mode === 'reset') {
+        if (password !== confirmPassword) {
+          setError('Mismatch: Passwords do not match.');
+          setLoading(false);
+          return;
+        }
+
+        const hashedPassword = await hashPassword(password);
+        const updatedUser = { email: normalizedEmail, userName, mobile, password: hashedPassword };
+        
+        await authService.registerUserInCloud(updatedUser);
+        
+        const localUsers = JSON.parse(localStorage.getItem('osm_users') || '[]');
+        const existingIdx = localUsers.findIndex((u: any) => u.email === normalizedEmail);
+        if (existingIdx > -1) {
+          localUsers[existingIdx] = updatedUser;
+        } else {
+          localUsers.push(updatedUser);
+        }
+        localStorage.setItem('osm_users', JSON.stringify(localUsers));
+        
+        alert('SUCCESS: Credentials updated. Proceeding to Login.');
+        setMode('login');
       }
     } catch (err: any) {
       setError(`Signal Error: ${err.message}`);
     } finally {
       setLoading(false);
     }
+  };
+
+  const resetFields = () => {
+    setError('');
+    setPassword('');
+    setConfirmPassword('');
+    setUserOtpInput('');
+    setShowPassword(false);
+    setShowConfirmPassword(false);
   };
 
   return (
@@ -104,48 +167,79 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
 
         <form onSubmit={handleAuth} className="glass-panel p-8 rounded-[40px] border border-slate-200 shadow-2xl transition-all relative">
           <div className="space-y-4">
+            {/* EMAIL FIELD */}
+            {(mode !== 'verify' && mode !== 'reset') && (
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input 
+                  type="email" placeholder="Registered Email" value={email} onChange={e => setEmail(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 py-4 pl-12 pr-4 rounded-2xl text-[12px] font-bold tracking-widest focus:ring-2 ring-indigo-500/20 outline-none" required 
+                />
+              </div>
+            )}
+
+            {/* SIGNUP EXTRA FIELDS */}
             {mode === 'signup' && (
               <>
                 <div className="relative">
                   <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input 
-                    type="text" placeholder="USER NAME" value={userName} onChange={e => setUserName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 py-4 pl-12 pr-4 rounded-2xl text-[11px] font-bold uppercase tracking-widest focus:ring-2 ring-indigo-500/20 outline-none" required 
+                    type="text" placeholder="Full Name" value={userName} onChange={e => setUserName(groupName => e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 py-4 pl-12 pr-4 rounded-2xl text-[12px] font-bold tracking-widest focus:ring-2 ring-indigo-500/20 outline-none" required 
                   />
                 </div>
                 <div className="relative">
                   <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input 
-                    type="text" placeholder="MOBILE NUMBER" value={mobile} onChange={e => setMobile(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 py-4 pl-12 pr-4 rounded-2xl text-[11px] font-bold uppercase tracking-widest focus:ring-2 ring-indigo-500/20 outline-none" required 
+                    type="text" placeholder="Mobile Number" value={mobile} onChange={e => setMobile(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 py-4 pl-12 pr-4 rounded-2xl text-[12px] font-bold tracking-widest focus:ring-2 ring-indigo-500/20 outline-none" required 
                   />
                 </div>
               </>
             )}
             
-            {(mode === 'login' || mode === 'signup') && (
-              <>
-                <div className="relative">
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                  <input 
-                    type="email" placeholder="REGISTER MAIL" value={email} onChange={e => setEmail(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 py-4 pl-12 pr-4 rounded-2xl text-[11px] font-bold uppercase tracking-widest focus:ring-2 ring-indigo-500/20 outline-none" required 
-                  />
-                </div>
-
-                <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                  <input 
-                    type="password" placeholder="PASSWORD" value={password} onChange={e => setPassword(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 py-4 pl-12 pr-4 rounded-2xl text-[11px] font-bold uppercase tracking-widest focus:ring-2 ring-indigo-500/20 outline-none" required 
-                  />
-                </div>
-              </>
+            {/* PASSWORD FIELDS */}
+            {(mode === 'login' || mode === 'signup' || mode === 'reset') && (
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input 
+                  type={showPassword ? "text" : "password"} 
+                  placeholder={mode === 'reset' ? "New Password" : "Password"} 
+                  value={password} onChange={e => setPassword(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 py-4 pl-12 pr-12 rounded-2xl text-[12px] font-bold tracking-widest focus:ring-2 ring-indigo-500/20 outline-none" required 
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             )}
 
+            {(mode === 'signup' || mode === 'reset') && (
+              <div className="relative">
+                <CheckCircle2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input 
+                  type={showConfirmPassword ? "text" : "password"} 
+                  placeholder="Confirm Password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 py-4 pl-12 pr-12 rounded-2xl text-[12px] font-bold tracking-widest focus:ring-2 ring-indigo-500/20 outline-none" required 
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
+                >
+                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            )}
+
+            {/* OTP VERIFICATION */}
             {mode === 'verify' && (
               <div className="py-2 text-center">
-                <p className="text-[10px] text-slate-500 font-bold uppercase mb-4">Enter 4-Digit Gateway Code</p>
+                <p className="text-[10px] text-slate-500 font-bold uppercase mb-4 tracking-widest">Enter 4-Digit Security Code</p>
                 <div className="relative inline-block w-48">
                   <input 
                     type="text" maxLength={4} placeholder="0000" 
@@ -165,7 +259,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
                   <ShieldAlert className="text-red-500" size={14} />
                   <p className="text-red-600 text-[9px] font-black uppercase">Technical Fault</p>
                 </div>
-                <p className="text-red-500 text-[8px] font-mono break-words">{error}</p>
+                <p className="text-red-500 text-[9px] font-mono break-words leading-tight">{error}</p>
             </div>
           )}
 
@@ -175,20 +269,36 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
           >
             {loading ? <Loader2 className="animate-spin" /> : 
              mode === 'login' ? 'LOGIN' : 
-             mode === 'signup' ? 'DISPATCH OTP' : 'Finalize Registry'}
+             mode === 'signup' ? 'DISPATCH OTP' : 
+             mode === 'forgot' ? 'REQUEST RESET' :
+             mode === 'reset' ? 'UPDATE PASSWORD' : 'Verify Registry'}
             <ArrowRight size={18} />
           </button>
 
-          <button 
-            type="button" onClick={() => {
-              setMode(mode === 'login' ? 'signup' : 'login');
-              setError('');
-            }}
-            className="w-full mt-4 text-[9px] text-slate-400 font-bold uppercase tracking-widest hover:text-indigo-600 transition-colors flex items-center justify-center gap-2"
-          >
-            <RefreshCcw size={10} />
-            {mode === 'login' ? 'REGISTER USER' : 'Authorized Personnel? Access'}
-          </button>
+          <div className="flex flex-col gap-2 mt-6">
+            <button 
+              type="button" onClick={() => {
+                setMode(mode === 'login' ? 'signup' : 'login');
+                resetFields();
+              }}
+              className="w-full text-[10px] text-slate-400 font-bold uppercase tracking-widest hover:text-indigo-600 transition-colors flex items-center justify-center gap-2"
+            >
+              <RefreshCcw size={12} />
+              {mode === 'login' ? 'Register New Operator' : 'Return to Authorized Access'}
+            </button>
+
+            {mode === 'login' && (
+              <button 
+                type="button" onClick={() => {
+                  setMode('forgot');
+                  resetFields();
+                }}
+                className="w-full text-[10px] text-indigo-500 font-bold uppercase tracking-[0.2em] hover:text-indigo-700 transition-colors flex items-center justify-center gap-2 mt-2"
+              >
+                Forgot Password?
+              </button>
+            )}
+          </div>
         </form>
       </div>
     </div>
