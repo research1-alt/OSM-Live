@@ -1,4 +1,3 @@
-
 {
   "name": "pcan-live-insight-dashboard",
   "private": true,
@@ -14,7 +13,7 @@
     "react-dom": "^19.2.3",
     "@google/genai": "^1.34.0",
     "lucide-react": "^0.562.0",
-    "recharts": "2.15.0"
+    "recharts": "^3.6.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

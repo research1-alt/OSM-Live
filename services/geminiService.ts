@@ -1,16 +1,13 @@
 
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { CANFrame, SignalAnalysis } from "../types.ts";
-import { authService, User } from "./authService.ts";
 
 /**
- * Analyzes CAN bus traffic using Gemini AI and logs the query to the Google Script backend.
+ * Analyzes CAN bus traffic using Gemini AI.
+ * This function handles sending a summary of frames to the model and parsing the response.
  */
-export async function analyzeCANData(
-  frames: CANFrame[], 
-  user?: User, 
-  sessionId?: string
-): Promise<SignalAnalysis> {
+export async function analyzeCANData(frames: CANFrame[]): Promise<SignalAnalysis> {
+  // Always initialize GoogleGenAI inside the function with a named parameter to ensure it uses the most up-to-date process.env.API_KEY.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = 'gemini-3-pro-preview';
   
@@ -25,7 +22,7 @@ export async function analyzeCANData(
     Frames: ${JSON.stringify(frameSummary)}
     
     1. Identify the likely protocol (OBD-II, J1939, UDS, or proprietary).
-    2. Look for patterns in the data bytes that suggest specific signals.
+    2. Look for patterns in the data bytes that suggest specific signals (e.g., counters, checksums, or physical values like RPM/Speed).
     3. Detect any timing anomalies or suspicious message ID patterns.
     4. Suggest diagnostic steps.
     
@@ -33,25 +30,20 @@ export async function analyzeCANData(
   `;
 
   try {
+    // Using ai.models.generateContent with both model name and prompt in parameters as required.
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: model,
       contents: prompt,
     });
 
+    // Access text directly from the response property (do not call text() as a method).
     const text = response.text || "No analysis available.";
-    const isUnclear = text.length < 50 || text.toLowerCase().includes("cannot determine") || text.toLowerCase().includes("anomaly");
-
-    // LOG TO SPREADSHEET VIA APPS SCRIPT
-    // Now logging both the Prompt AND the resulting AI Analysis
-    if (user && sessionId) {
-      authService.logQuery(user, prompt.substring(0, 500), text, isUnclear, sessionId).catch(console.error);
-    }
 
     return {
       summary: text,
       detectedProtocols: text.toLowerCase().includes('j1939') ? ['J1939'] : text.toLowerCase().includes('obd') ? ['OBD-II'] : ['Generic CAN'],
-      anomalies: text.toLowerCase().includes('anomaly') ? ['Signal patterns identified as potential faults'] : [],
-      recommendations: "Verify bus load and check for potential termination resistor failure.",
+      anomalies: text.toLowerCase().includes('anomaly') ? ['Timing jitter detected'] : [],
+      recommendations: "Review signal cycle times and verify parity bits.",
       sources: [] 
     };
   } catch (error) {

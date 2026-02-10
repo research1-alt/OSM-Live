@@ -1,11 +1,10 @@
-
 package com.example.osmlive;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
-import android.app.Activity;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
@@ -42,11 +41,10 @@ import android.webkit.WebViewClient;
 import android.webkit.JavascriptInterface;
 import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 
 import java.io.File;
@@ -70,43 +68,20 @@ public class MainActivity extends AppCompatActivity {
     private static final UUID TX_CHAR_UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
     private static final UUID CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
-    private final Handler scanHandler = new Handler(Looper.getMainLooper());
-    private boolean isScanning = false;
-    private boolean isPendingScan = false;
-
-    private final ActivityResultLauncher<Intent> enableBtLauncher = registerForActivityResult(
-            new ActivityResultContracts.StartActivityForResult(),
-            result -> {
-                if (result.getResultCode() == Activity.RESULT_OK) {
-                    sendToJs("STATE_SUCCESS: Bluetooth enabled.");
-                    scanHandler.postDelayed(() -> new NativeBleBridge().startBleLink(), 1000);
-                } else {
-                    sendToJs("STATE_ERROR: Bluetooth enabling rejected.");
-                    evaluateJs("window.onNativeBleStatus('error')");
-                }
-            }
-    );
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         webView = findViewById(R.id.webView);
 
-        initBluetooth();
+        BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+        bluetoothAdapter = bluetoothManager.getAdapter();
+
         createNotificationChannel();
         checkAndRequestPermissions();
         setupWebView();
-        
         webView.loadUrl("https://live-data-rust.vercel.app/");
         setupBackNavigation();
-    }
-
-    private void initBluetooth() {
-        BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
-        if (bluetoothManager != null) {
-            bluetoothAdapter = bluetoothManager.getAdapter();
-        }
     }
 
     private void createNotificationChannel() {
@@ -126,14 +101,15 @@ public class MainActivity extends AppCompatActivity {
     private void checkAndRequestPermissions() {
         List<String> permissions = new ArrayList<>();
         permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
-        permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
         
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
         }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS);
         }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             permissions.add(Manifest.permission.BLUETOOTH_SCAN);
             permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
@@ -175,110 +151,48 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    @SuppressWarnings("unused")
     public class NativeBleBridge {
         @JavascriptInterface
         public void startBleLink() {
-            runOnUiThread(() -> {
-                if (isPendingScan) return;
-                
-                if (bluetoothAdapter == null) {
-                    sendToJs("STATE_ERROR: Bluetooth Hardware not found.");
-                    evaluateJs("window.onNativeBleStatus('error')");
-                    return;
-                }
-
-                if (!bluetoothAdapter.isEnabled()) {
-                    sendToJs("STATE_ERROR: Bluetooth is OFF.");
-                    Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-                    if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                        enableBtLauncher.launch(enableBtIntent);
-                    }
-                    return;
-                }
-
-                if (!isLocationEnabled()) {
-                    sendToJs("STATE_ERROR: Location Services are OFF.");
-                    startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
-                    evaluateJs("window.onNativeBleStatus('error')");
-                    return;
-                }
-
-                // Aggressive reset to clear Registration Code 2
-                stopBleScan();
-                
-                isPendingScan = true;
-                sendToJs("SCAN_RESET: Releasing internal handles...");
-                
-                scanHandler.postDelayed(() -> {
-                    isPendingScan = false;
-                    bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
-                    if (bluetoothLeScanner == null) {
-                        sendToJs("SCAN_ERROR: Internal stack error. Toggle Bluetooth.");
-                        evaluateJs("window.onNativeBleStatus('error')");
-                        return;
-                    }
-
-                    ScanSettings scanSettings = new ScanSettings.Builder()
-                            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-                            .build();
-
-                    if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
-                        try {
-                            isScanning = true;
-                            bluetoothLeScanner.startScan(null, scanSettings, scanCallback);
-                            sendToJs("SCAN_INIT: Monitoring 2.4GHz...");
-                            
-                            scanHandler.removeCallbacksAndMessages(null);
-                            scanHandler.postDelayed(() -> {
-                                if (isScanning) {
-                                    stopBleScan();
-                                    sendToJs("SCAN_TIMEOUT: No compatible device detected.");
-                                    evaluateJs("window.onNativeBleStatus('disconnected')");
-                                }
-                            }, 25000);
-                        } catch (Exception e) {
-                            isScanning = false;
-                            sendToJs("SCAN_EXCEPTION: " + e.getMessage());
-                            evaluateJs("window.onNativeBleStatus('error')");
-                        }
-                    } else {
-                        sendToJs("STATE_ERROR: Permissions denied.");
-                        evaluateJs("window.onNativeBleStatus('error')");
-                    }
-                }, 800); // 800ms gap to ensure system registration is cleared
-            });
-        }
-
-        private void stopBleScan() {
-            if (bluetoothLeScanner != null && isScanning) {
-                if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
-                    try {
-                        bluetoothLeScanner.stopScan(scanCallback);
-                    } catch (Exception e) {
-                        Log.e(TAG, "Stop scan error", e);
-                    }
-                }
+            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+                sendToJs("STATE_ERROR: Bluetooth is DISABLED on your phone.");
+                return;
             }
-            isScanning = false;
-            bluetoothLeScanner = null;
+
+            if (!isLocationEnabled()) {
+                sendToJs("STATE_ERROR: Location Services are OFF.");
+                startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+                return;
+            }
+
+            bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+            sendToJs("SCAN_INIT: Starting high-latency discovery...");
+
+            ScanSettings settings = new ScanSettings.Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .build();
+
+            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
+                bluetoothLeScanner.startScan(null, settings, scanCallback);
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    if (bluetoothLeScanner != null) {
+                        bluetoothLeScanner.stopScan(scanCallback);
+                        sendToJs("SCAN_TIMEOUT: Discovery cycle finished.");
+                    }
+                }, 20000);
+            } else {
+                sendToJs("STATE_ERROR: Nearby Devices permission missing.");
+            }
         }
 
         @JavascriptInterface
         public void disconnectBle() {
-            runOnUiThread(() -> {
-                stopBleScan();
-                if (bluetoothGatt != null) {
-                    if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                        bluetoothGatt.disconnect();
-                        bluetoothGatt.close();
-                        bluetoothGatt = null;
-                        sendToJs("LINK_STATUS: Disconnected.");
-                        evaluateJs("window.onNativeBleStatus('disconnected')");
-                    }
+            if (bluetoothGatt != null) {
+                if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                    bluetoothGatt.disconnect();
+                    sendToJs("LINK: Disconnected by user.");
                 }
-            });
+            }
         }
     }
 
@@ -288,39 +202,16 @@ public class MainActivity extends AppCompatActivity {
             BluetoothDevice device = result.getDevice();
             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                 String name = device.getName();
-                if (name != null) {
-                    if (name.contains("OSM") || name.contains("ESP32") || name.contains("CAN")) {
-                        sendToJs("LINK_MATCH: Found " + name);
-                        if (isScanning && bluetoothLeScanner != null) {
-                            bluetoothLeScanner.stopScan(scanCallback);
-                            isScanning = false;
-                        }
-                        connectToDevice(device);
-                    }
+                if (name != null && (name.contains("OSM_CAN") || name.contains("ESP32"))) {
+                    sendToJs("TARGET_FOUND: Connecting to " + name + "...");
+                    bluetoothLeScanner.stopScan(scanCallback);
+                    connectToDevice(device);
                 }
             }
         }
-
         @Override
         public void onScanFailed(int errorCode) {
-            isScanning = false;
-            String message;
-            switch (errorCode) {
-                case SCAN_FAILED_APPLICATION_REGISTRATION_FAILED:
-                    message = "INTERNAL_ERROR: App Registration Failed (Code 2). Please toggle Bluetooth OFF and ON in system settings.";
-                    break;
-                case SCAN_FAILED_ALREADY_STARTED:
-                    message = "Scan currently active.";
-                    break;
-                case SCAN_FAILED_INTERNAL_ERROR:
-                    message = "Bluetooth Controller Error.";
-                    break;
-                default:
-                    message = "Scan failure code " + errorCode;
-                    break;
-            }
-            sendToJs("SCAN_ERROR: " + message);
-            evaluateJs("window.onNativeBleStatus('error')");
+            sendToJs("SCAN_ERROR: Code " + errorCode);
         }
     };
 
@@ -334,30 +225,13 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                sendToJs("GATT_STATUS: Handshaking...");
+                sendToJs("GATT: Handshake successful.");
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                    scanHandler.postDelayed(() -> {
-                        if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                            gatt.requestMtu(512);
-                        }
-                    }, 800);
+                    gatt.discoverServices();
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                sendToJs("GATT_STATUS: Offline.");
+                sendToJs("GATT: Connection lost.");
                 evaluateJs("window.onNativeBleStatus('disconnected')");
-                if (bluetoothGatt != null) {
-                    if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                        bluetoothGatt.close();
-                    }
-                    bluetoothGatt = null;
-                }
-            }
-        }
-
-        @Override
-        public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
-            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                gatt.discoverServices();
             }
         }
 
@@ -374,7 +248,7 @@ public class MainActivity extends AppCompatActivity {
                             if (descriptor != null) {
                                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                                 gatt.writeDescriptor(descriptor);
-                                sendToJs("BRIDGE_ACTIVE: Data streaming.");
+                                sendToJs("LINK_ESTABLISHED: CAN stream active.");
                                 evaluateJs("window.onNativeBleStatus('connected')");
                             }
                         }
@@ -384,13 +258,10 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @Override
-        public void onCharacteristicChanged(BluetoothGatt gatt, @NonNull BluetoothGattCharacteristic characteristic) {
+        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             if (TX_CHAR_UUID.equals(characteristic.getUuid())) {
-                byte[] value = characteristic.getValue();
-                if (value != null) {
-                    String data = new String(value);
-                    evaluateJs("window.onNativeBleData('" + data.replace("\n", "\\n").replace("\r", "") + "')");
-                }
+                String data = new String(characteristic.getValue());
+                evaluateJs("window.onNativeBleData('" + data.replace("\n", "").replace("\r", "") + "')");
             }
         }
     };
@@ -415,7 +286,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    @SuppressWarnings("unused")
     public class WebAppInterface {
         @JavascriptInterface
         public boolean isNativeApp() { return true; }
@@ -424,12 +294,16 @@ public class MainActivity extends AppCompatActivity {
         public void saveFile(String data, String fileName) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // Modern approach (Android 10+)
                     ContentValues values = new ContentValues();
                     values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
                     values.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");
                     values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+
+                    // Use Uri.parse to avoid compilation error on the direct MediaStore.Downloads.EXTERNAL_CONTENT_URI field
                     Uri externalUri = Uri.parse("content://media/external/downloads");
                     Uri uri = getContentResolver().insert(externalUri, values);
+                    
                     if (uri != null) {
                         try (OutputStream outputStream = getContentResolver().openOutputStream(uri)) {
                             if (outputStream != null) {
@@ -440,26 +314,54 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 } else {
+                    // Legacy approach (Android 9 and below)
                     File path = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                    if (!path.exists()) {
-                        if (!path.mkdirs()) Log.e(TAG, "Failed to create directory");
-                    }
+                    if (!path.exists()) path.mkdirs();
+                    
                     File file = new File(path, fileName);
                     try (FileOutputStream fos = new FileOutputStream(file)) {
                         fos.write(data.getBytes());
                         fos.flush();
                     }
+                    
+                    // Refresh MediaScanner so file appears in "Downloads" app
                     MediaScannerConnection.scanFile(MainActivity.this, new String[]{file.getAbsolutePath()}, null, null);
                     onSaveComplete(fileName);
                 }
             } catch (Exception e) {
-                sendToJs("FILE_ERROR: " + e.getMessage());
+                Log.e(TAG, "Save Error: " + e.getMessage());
+                sendToJs("NATIVE_SAVE_ERROR: " + e.getMessage());
             }
         }
 
         private void onSaveComplete(String fileName) {
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Trace Exported: " + fileName, Toast.LENGTH_SHORT).show());
-            sendToJs("NATIVE_SAVE: " + fileName);
+            runOnUiThread(() -> {
+                Toast.makeText(MainActivity.this, "Trace Saved: " + fileName, Toast.LENGTH_SHORT).show();
+                showSystemNotification(fileName);
+            });
+            sendToJs("NATIVE_SAVE: Success -> " + fileName);
+        }
+    }
+
+    private void showSystemNotification(String fileName) {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        
+        // Fix for Android 12+ PendingIntent requirements
+        int flags = PendingIntent.FLAG_IMMUTABLE;
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle("OSM Trace Saved")
+                .setContentText("File " + fileName + " is ready in Downloads")
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true);
+
+        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(this);
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            notificationManager.notify((int) System.currentTimeMillis(), builder.build());
         }
     }
 }
