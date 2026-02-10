@@ -10,11 +10,11 @@ import SignalGauges from '@/components/SignalGauges';
 import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary } from '@/types';
 import { MY_CUSTOM_DBC, DEFAULT_LIBRARY_NAME } from '@/data/dbcProfiles';
 import { normalizeId, formatIdForDisplay, decodeSignal } from '@/utils/decoder';
-import { User, authService, SPREADSHEET_URL } from '@/services/authService';
+import { User, authService } from '@/services/authService';
+import { generateMockPacket } from '@/utils/canSim';
 
-const MAX_FRAME_LIMIT = 1000000; 
+const MAX_FRAME_LIMIT = 50000; 
 const BATCH_UPDATE_INTERVAL = 60; 
-const SESSION_HEARTBEAT_INTERVAL = 5000; 
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -29,7 +29,7 @@ const App: React.FC = () => {
   const [hwStatus, setHwStatus] = useState<HardwareStatus>('offline');
   const [baudRate, setBaudRate] = useState(115200);
   const [debugLog, setDebugLog] = useState<string[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
+  const [simulationEnabled, setSimulationEnabled] = useState(true);
   
   const [library, setLibrary] = useState<ConversionLibrary>({
     id: 'default-pcan-lib',
@@ -38,33 +38,11 @@ const App: React.FC = () => {
     lastUpdated: Date.now(),
   });
 
-  const isAdmin = useMemo(() => user ? authService.isAdmin(user.email) : false, [user]);
-
-  useEffect(() => {
-    if (bridgeStatus === 'connected' && dashboardTab === 'link') {
-        setDashboardTab('trace');
-    }
-  }, [bridgeStatus, dashboardTab]);
-
-  useEffect(() => {
-    const stored = localStorage.getItem('osm_currentUser');
-    const storedSid = localStorage.getItem('osm_sid');
-    if (stored && storedSid) {
-      setUser(JSON.parse(stored));
-      setSessionId(storedSid);
-    }
-  }, []);
-
   const frameMapRef = useRef<Map<string, CANFrame>>(new Map());
   const pendingFramesRef = useRef<CANFrame[]>([]);
-  const isPausedRef = useRef(isPaused);
   const bleBufferRef = useRef<string>("");
-  
   const serialPortRef = useRef<any>(null);
-  const serialReaderRef = useRef<any>(null);
   const keepReadingRef = useRef(false);
-
-  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
   const addDebugLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
@@ -72,7 +50,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleNewFrame = useCallback((id: string, dlc: number, data: string[]) => {
-    if (isPausedRef.current) return;
+    if (isPaused) return;
     const normId = normalizeId(id, true);
     if (!normId) return;
     const displayId = `0x${formatIdForDisplay(normId)}`;
@@ -89,13 +67,17 @@ const App: React.FC = () => {
     };
     frameMapRef.current.set(normId, newFrame);
     pendingFramesRef.current.push(newFrame);
-  }, []);
+  }, [isPaused]);
 
+  // NATIVE BRIDGE REGISTRATION
   useEffect(() => {
     (window as any).onNativeBleLog = (msg: string) => addDebugLog(msg);
     (window as any).onNativeBleStatus = (status: string) => {
       setBridgeStatus(status as ConnectionStatus);
-      if (status === 'connected') setHwStatus('active');
+      if (status === 'connected') {
+          setHwStatus('active');
+          setSimulationEnabled(false);
+      }
       else if (status === 'error') setHwStatus('fault');
       else setHwStatus('offline');
     };
@@ -119,30 +101,20 @@ const App: React.FC = () => {
     };
   }, [addDebugLog, handleNewFrame]);
 
-  const disconnectHardware = useCallback(async () => {
-    keepReadingRef.current = false;
-    if (serialReaderRef.current) try { await serialReaderRef.current.cancel(); } catch (e) {}
-    if (serialPortRef.current) {
-      try { await serialPortRef.current.close(); } catch (e) {}
-      serialPortRef.current = null;
-    }
-    if ((window as any).NativeBleBridge) (window as any).NativeBleBridge.disconnectBle();
-    setBridgeStatus('disconnected');
-    setHwStatus('offline');
-  }, []);
-
-  const handleLogout = useCallback(() => {
-    setUser(null);
-    setSessionId(null);
-    localStorage.removeItem('osm_currentUser');
-    localStorage.removeItem('osm_sid');
-    setView('home');
-    disconnectHardware();
-  }, [disconnectHardware]);
+  // SIMULATION GENERATOR
+  useEffect(() => {
+    if (!simulationEnabled || bridgeStatus === 'connected' || bridgeStatus === 'connecting') return;
+    const interval = setInterval(() => {
+        const mock = generateMockPacket(frameMapRef.current, performance.now());
+        handleNewFrame(mock.id.replace('0x',''), mock.dlc, mock.data);
+    }, 500);
+    return () => clearInterval(interval);
+  }, [simulationEnabled, bridgeStatus, handleNewFrame]);
 
   const connectSerial = async () => {
     if (!("serial" in navigator)) {
         addDebugLog("ERROR: Serial API not supported in this browser.");
+        setBridgeStatus('error');
         return;
     }
     try {
@@ -151,31 +123,28 @@ const App: React.FC = () => {
       await port.open({ baudRate });
       serialPortRef.current = port;
       setBridgeStatus('connected');
+      setSimulationEnabled(false);
       keepReadingRef.current = true;
       const decoder = new TextDecoder();
       let buffer = "";
-      while (port.readable && keepReadingRef.current) {
-        serialReaderRef.current = port.readable.getReader();
-        try {
-          while (keepReadingRef.current) {
-            const { value, done } = await serialReaderRef.current.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || "";
-            for (const line of lines) {
-              const cleanLine = line.trim();
-              if (!cleanLine) continue;
-              const parts = cleanLine.split('#');
-              if (parts.length >= 3) handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
-            }
+      
+      const reader = port.readable.getReader();
+      try {
+        while (keepReadingRef.current) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const cleanLine = line.trim();
+            if (!cleanLine) continue;
+            const parts = cleanLine.split('#');
+            if (parts.length >= 3) handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
           }
-        } catch (err: any) {
-          if (keepReadingRef.current) addDebugLog(`SERIAL_ERROR: ${err.message}`);
-        } finally { 
-          serialReaderRef.current.releaseLock();
-          serialReaderRef.current = null;
         }
+      } finally {
+        reader.releaseLock();
       }
     } catch (err: any) { 
       setBridgeStatus('disconnected'); 
@@ -183,11 +152,29 @@ const App: React.FC = () => {
     }
   };
 
+  const disconnectHardware = useCallback(async () => {
+    keepReadingRef.current = false;
+    if (serialPortRef.current) {
+      try { await serialPortRef.current.close(); } catch (e) {}
+      serialPortRef.current = null;
+    }
+    if ((window as any).NativeBleBridge) (window as any).NativeBleBridge.disconnectBle();
+    setBridgeStatus('disconnected');
+    setHwStatus('offline');
+    setSimulationEnabled(true);
+  }, []);
+
   const handleConnect = () => {
-    if (hardwareMode === 'esp32-serial' || hardwareMode === 'pcan') connectSerial();
-    else if (hardwareMode === 'esp32-bt') {
+    setSimulationEnabled(false);
+    frameMapRef.current.clear();
+    setFrames([]);
+    
+    if (hardwareMode === 'esp32-bt') {
         setBridgeStatus('connecting');
         (window as any).NativeBleBridge?.startBleLink();
+    } else {
+        // Handle PCAN or ESP32-Wired via Serial
+        connectSerial();
     }
   };
 
@@ -221,7 +208,16 @@ const App: React.FC = () => {
     return result;
   }, [frames, library.database]);
 
-  if (!user) return <AuthScreen onAuthenticated={(u, s) => { setUser(u); setSessionId(s); localStorage.setItem('osm_currentUser', JSON.stringify(u)); localStorage.setItem('osm_sid', s); }} />;
+  const handleLogout = () => {
+    setUser(null);
+    setSessionId(null);
+    localStorage.removeItem('osm_currentUser');
+    localStorage.removeItem('osm_sid');
+    setView('home');
+    disconnectHardware();
+  };
+
+  if (!user) return <AuthScreen onAuthenticated={(u, s) => { setUser(u); setSessionId(s); }} />;
 
   if (view === 'home') {
     return (
@@ -251,7 +247,6 @@ const App: React.FC = () => {
         {dashboardTab === 'link' ? (
           <ConnectionPanel 
             status={bridgeStatus} 
-            hwStatus={hwStatus} 
             hardwareMode={hardwareMode}
             onSetHardwareMode={setHardwareMode} 
             baudRate={baudRate} 
@@ -265,7 +260,7 @@ const App: React.FC = () => {
         ) : dashboardTab === 'trace' ? (
           <div className="flex-1 flex flex-col overflow-hidden p-4 gap-4">
              <SignalGauges data={gaugeData} />
-             <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} onSaveTrace={() => {}} isSaving={isSaving} />
+             <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} />
           </div>
         ) : (
           <LibraryPanel library={library} onUpdateLibrary={setLibrary} latestFrames={latestFrames} />

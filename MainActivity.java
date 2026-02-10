@@ -158,7 +158,6 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void startBleLink() {
             runOnUiThread(() -> {
-                // Aggressively cleanup before starting
                 cleanupBluetooth();
                 
                 if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
@@ -171,12 +170,13 @@ public class MainActivity extends AppCompatActivity {
 
                 bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
                 if (bluetoothLeScanner == null) {
-                    sendToJs("ERROR: System Scanner not found. Bluetooth might be busy.");
+                    sendToJs("ERROR: System Scanner not found. Bluetooth service busy.");
                     return;
                 }
 
                 ScanSettings settings = new ScanSettings.Builder()
                         .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                        .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
                         .build();
 
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
@@ -188,7 +188,7 @@ public class MainActivity extends AppCompatActivity {
                         mainHandler.postDelayed(() -> {
                             if (isScanning) {
                                 stopCurrentScan();
-                                sendToJs("TIMEOUT: No device found.");
+                                sendToJs("TIMEOUT: Bridge not found in 20s.");
                                 evaluateJs("window.onNativeBleStatus('disconnected')");
                             }
                         }, 20000);
@@ -233,8 +233,8 @@ public class MainActivity extends AppCompatActivity {
             BluetoothDevice device = result.getDevice();
             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                 String name = device.getName();
-                if (name != null && (name.contains("OSM") || name.contains("ESP32"))) {
-                    sendToJs("MATCH: " + name + " found. Connecting...");
+                if (name != null && (name.contains("OSM") || name.contains("ESP32") || name.contains("CAN"))) {
+                    sendToJs("MATCH: " + name + " found.");
                     new NativeBleBridge().stopCurrentScan();
                     connectToDevice(device);
                 }
@@ -244,17 +244,17 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onScanFailed(int errorCode) {
             isScanning = false;
-            if (errorCode == SCAN_FAILED_APPLICATION_REGISTRATION_FAILED) {
-                sendToJs("CRITICAL_ERROR: Bluetooth Stack Saturated (Code 2). Manual Reset Required.");
-                evaluateJs("window.onNativeBleStatus('error')");
-            } else {
-                sendToJs("SCAN_FAILED: Code " + errorCode);
-            }
+            String msg = (errorCode == SCAN_FAILED_APPLICATION_REGISTRATION_FAILED) 
+                         ? "Code 2: Stack Full. Manual Reset Req." 
+                         : "Error Code " + errorCode;
+            sendToJs("SCAN_FAILED: " + msg);
+            evaluateJs("window.onNativeBleStatus('error')");
         }
     };
 
     private void connectToDevice(BluetoothDevice device) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+            sendToJs("LINK: Contacting hardware...");
             bluetoothGatt = device.connectGatt(this, false, gattCallback);
         }
     }
@@ -263,16 +263,17 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                sendToJs("LINK: Handshake started.");
+                sendToJs("LINK: Handshake initiated.");
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                    // Delay MTU to allow internal stack preparation
                     mainHandler.postDelayed(() -> {
                         if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                             gatt.requestMtu(512);
                         }
-                    }, 800);
+                    }, 1000);
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                sendToJs("LINK: Disconnected.");
+                sendToJs("LINK: Terminated.");
                 evaluateJs("window.onNativeBleStatus('disconnected')");
                 if (bluetoothGatt != null) {
                     if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
@@ -285,9 +286,13 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
-            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                gatt.discoverServices();
-            }
+            sendToJs("LINK: MTU Sync (" + mtu + " bytes)");
+            // Crucial: Wait before discovering services after MTU change
+            mainHandler.postDelayed(() -> {
+                if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                    gatt.discoverServices();
+                }
+            }, 600);
         }
 
         @Override
@@ -303,11 +308,13 @@ public class MainActivity extends AppCompatActivity {
                             if (descriptor != null) {
                                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                                 gatt.writeDescriptor(descriptor);
-                                sendToJs("STREAM_ACTIVE: Receiving CAN data.");
+                                sendToJs("BRIDGE: Live stream active.");
                                 evaluateJs("window.onNativeBleStatus('connected')");
                             }
                         }
                     }
+                } else {
+                    sendToJs("ERROR: NUS Service not found on hardware.");
                 }
             }
         }
