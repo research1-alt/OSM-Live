@@ -13,8 +13,8 @@ const ESP32SetupGuide: React.FC<ESP32SetupGuideProps> = ({ onClose, baudRate }) 
 
   const hybridFirmware = useMemo(() => {
     return `/* 
- * OSM UNIFIED CAN BRIDGE v12.1
- * Fixed: BLE Packet Termination
+ * OSM UNIFIED CAN BRIDGE v12.0
+ * Supports: USB-Serial AND Bluetooth BLE Simultaneously
  */
 #include <Arduino.h>
 #include "driver/twai.h"
@@ -23,32 +23,34 @@ const ESP32SetupGuide: React.FC<ESP32SetupGuideProps> = ({ onClose, baudRate }) 
 #include <BLEUtils.h>
 #include <BLE2902.h>
 
+// PIN CONFIGURATION
 #define CAN_TX_PIN GPIO_NUM_5
 #define CAN_RX_PIN GPIO_NUM_4
 
+// BLE UUIDs (Nordic UART Service)
 #define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define TX_CHARACTERISTIC_UUID "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
 BLEServer* pServer = NULL;
 BLECharacteristic* pTxCharacteristic;
 bool deviceConnected = false;
+unsigned long lastHeartbeat = 0;
 
 class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) { 
-      deviceConnected = true; 
-      Serial.println("BLE: CLIENT_CONNECTED");
-    };
+    void onConnect(BLEServer* pServer) { deviceConnected = true; };
     void onDisconnect(BLEServer* pServer) { 
         deviceConnected = false; 
-        Serial.println("BLE: CLIENT_DISCONNECTED");
-        pServer->getAdvertising()->start(); 
+        pServer->getAdvertising()->start(); // Restart advertising
     }
 };
 
 void setup() {
+  // 1. Initialize Serial
   Serial.begin(${baudRate});
   delay(1000);
+  Serial.println("SYS: HYBRID_BOOT_COMPLETE");
 
+  // 2. Initialize BLE
   BLEDevice::init("OSM_CAN_BT");
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
@@ -60,20 +62,27 @@ void setup() {
   pTxCharacteristic->addDescriptor(new BLE2902());
   pService->start();
   pServer->getAdvertising()->start();
+  Serial.println("SYS: BLE_SERVICE_ACTIVE");
 
+  // 3. Initialize CAN (TWAI)
   twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
   twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
   twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
-  twai_driver_install(&g_config, &t_config, &f_config);
+  if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK) {
+    Serial.println("SYS: CAN_DRIVER_READY");
+  }
   twai_start();
-  Serial.println("SYS: BRIDGE_ACTIVE_500K");
+  Serial.println("SYS: BUS_LISTENING");
 }
 
 void loop() {
   twai_message_t msg;
+  
+  // Process incoming CAN messages
   if (twai_receive(&msg, pdMS_TO_TICKS(1)) == ESP_OK) {
     if (!(msg.rtr)) {
+      // Format: ID#DLC#DATA1,DATA2...
       String packet = String(msg.identifier, HEX) + "#" + String(msg.data_length_code) + "#";
       for (int i = 0; i < msg.data_length_code; i++) {
         if (msg.data[i] < 0x10) packet += "0";
@@ -81,15 +90,22 @@ void loop() {
         if (i < msg.data_length_code - 1) packet += ",";
       }
 
+      // Output to SERIAL
       Serial.println(packet);
 
+      // Output to BLE (if connected)
       if (deviceConnected) {
-        // FIXED: Using single \n for proper JS splitting
-        String blePacket = packet + "\n";
+        String blePacket = packet + "\\n";
         pTxCharacteristic->setValue(blePacket.c_str());
         pTxCharacteristic->notify();
       }
     }
+  }
+
+  // Periodic Link Test
+  if (millis() - lastHeartbeat > 5000) {
+    Serial.println("SYS: HEARTBEAT_OK");
+    lastHeartbeat = millis();
   }
 }`;
   }, [baudRate]);
@@ -108,6 +124,7 @@ void setup() {
   twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
   twai_driver_install(&g_config, &t_config, &f_config);
   twai_start();
+  Serial.println("SYS: SERIAL_ONLY_ACTIVE");
 }
 
 void loop() {
@@ -187,7 +204,7 @@ void loop() {
              <div>
                <h4 className="text-[11px] font-orbitron font-black text-emerald-900 uppercase tracking-widest mb-1">Deployment Guide</h4>
                <p className="text-[10px] text-emerald-700 leading-relaxed">
-                 The <b>Hybrid Mode</b> enables both interfaces. Use 500kbps CAN speed. Ensure location services are ON on your phone during pairing.
+                 The <b>Hybrid Mode</b> enables both interfaces. You can leave the ESP32 plugged into power and connect to it wirelessly via Bluetooth, or plug it into your computer and use high-speed Serial. The data format remains 100% compatible with both methods.
                </p>
              </div>
           </div>
@@ -206,8 +223,25 @@ void loop() {
                 <pre className="p-6 bg-slate-900 rounded-3xl font-mono text-[11px] text-emerald-500/90 overflow-x-auto shadow-2xl h-[450px] custom-scrollbar border border-slate-800">
                 {currentCode}
                 </pre>
+                <div className="absolute top-0 right-0 p-4 pointer-events-none opacity-20">
+                    <Zap size={100} className="text-emerald-500" />
+                </div>
             </div>
           </section>
+
+          <div className="space-y-4">
+             <h4 className="text-[10px] font-orbitron font-black text-slate-400 uppercase tracking-widest">Pin_Layout</h4>
+             <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-500">CAN_TX</span>
+                    <span className="px-3 py-1 bg-white border border-slate-300 rounded-lg text-indigo-600 font-mono text-[10px] font-bold">GPIO_5</span>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-500">CAN_RX</span>
+                    <span className="px-3 py-1 bg-white border border-slate-300 rounded-lg text-indigo-600 font-mono text-[10px] font-bold">GPIO_4</span>
+                </div>
+             </div>
+          </div>
         </div>
 
         <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-4">
