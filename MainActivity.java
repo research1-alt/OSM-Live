@@ -1,3 +1,4 @@
+
 package com.example.osmlive;
 
 import android.Manifest;
@@ -80,6 +81,8 @@ public class MainActivity extends AppCompatActivity {
         createNotificationChannel();
         checkAndRequestPermissions();
         setupWebView();
+        
+        // This should match the deployment URL. In preview, we use current.
         webView.loadUrl("https://live-data-rust.vercel.app/");
         setupBackNavigation();
     }
@@ -155,7 +158,7 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void startBleLink() {
             if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
-                sendToJs("STATE_ERROR: Bluetooth is DISABLED on your phone.");
+                sendToJs("STATE_ERROR: Bluetooth is DISABLED.");
                 return;
             }
 
@@ -166,7 +169,7 @@ public class MainActivity extends AppCompatActivity {
             }
 
             bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
-            sendToJs("SCAN_INIT: Starting high-latency discovery...");
+            sendToJs("SCAN_INIT: Discovering OSM_CAN devices...");
 
             ScanSettings settings = new ScanSettings.Builder()
                     .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -177,11 +180,11 @@ public class MainActivity extends AppCompatActivity {
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
                     if (bluetoothLeScanner != null) {
                         bluetoothLeScanner.stopScan(scanCallback);
-                        sendToJs("SCAN_TIMEOUT: Discovery cycle finished.");
+                        sendToJs("SCAN_COMPLETE: Discovery cycle finished.");
                     }
-                }, 20000);
+                }, 15000);
             } else {
-                sendToJs("STATE_ERROR: Nearby Devices permission missing.");
+                sendToJs("STATE_ERROR: Bluetooth Permissions missing.");
             }
         }
 
@@ -190,7 +193,7 @@ public class MainActivity extends AppCompatActivity {
             if (bluetoothGatt != null) {
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                     bluetoothGatt.disconnect();
-                    sendToJs("LINK: Disconnected by user.");
+                    sendToJs("LINK: Disconnected.");
                 }
             }
         }
@@ -203,7 +206,7 @@ public class MainActivity extends AppCompatActivity {
             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                 String name = device.getName();
                 if (name != null && (name.contains("OSM_CAN") || name.contains("ESP32"))) {
-                    sendToJs("TARGET_FOUND: Connecting to " + name + "...");
+                    sendToJs("TARGET_FOUND: Pairing with " + name + "...");
                     bluetoothLeScanner.stopScan(scanCallback);
                     connectToDevice(device);
                 }
@@ -211,7 +214,7 @@ public class MainActivity extends AppCompatActivity {
         }
         @Override
         public void onScanFailed(int errorCode) {
-            sendToJs("SCAN_ERROR: Code " + errorCode);
+            sendToJs("SCAN_FAILED: Error Code " + errorCode);
         }
     };
 
@@ -225,13 +228,22 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                sendToJs("GATT: Handshake successful.");
+                sendToJs("GATT: Handshake. Requesting High-Speed MTU...");
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                    gatt.discoverServices();
+                    // Critical: Request larger MTU to avoid packet fragmentation
+                    gatt.requestMtu(512);
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                sendToJs("GATT: Connection lost.");
+                sendToJs("GATT: Connection Terminated.");
                 evaluateJs("window.onNativeBleStatus('disconnected')");
+            }
+        }
+
+        @Override
+        public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+            sendToJs("MTU_UPDATE: Negotiated " + mtu + " bytes.");
+            if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                gatt.discoverServices();
             }
         }
 
@@ -248,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
                             if (descriptor != null) {
                                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                                 gatt.writeDescriptor(descriptor);
-                                sendToJs("LINK_ESTABLISHED: CAN stream active.");
+                                sendToJs("LINK_ESTABLISHED: CAN stream live.");
                                 evaluateJs("window.onNativeBleStatus('connected')");
                             }
                         }
@@ -261,7 +273,8 @@ public class MainActivity extends AppCompatActivity {
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             if (TX_CHAR_UUID.equals(characteristic.getUuid())) {
                 String data = new String(characteristic.getValue());
-                evaluateJs("window.onNativeBleData('" + data.replace("\n", "").replace("\r", "") + "')");
+                // Stream to JS as raw line, handle fragment reassembly in React if needed
+                evaluateJs("window.onNativeBleData('" + data.replace("\n", "\\n").replace("\r", "") + "')");
             }
         }
     };
@@ -294,13 +307,11 @@ public class MainActivity extends AppCompatActivity {
         public void saveFile(String data, String fileName) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    // Modern approach (Android 10+)
                     ContentValues values = new ContentValues();
                     values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
                     values.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");
                     values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
 
-                    // Use Uri.parse to avoid compilation error on the direct MediaStore.Downloads.EXTERNAL_CONTENT_URI field
                     Uri externalUri = Uri.parse("content://media/external/downloads");
                     Uri uri = getContentResolver().insert(externalUri, values);
                     
@@ -314,40 +325,33 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 } else {
-                    // Legacy approach (Android 9 and below)
                     File path = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
                     if (!path.exists()) path.mkdirs();
-                    
                     File file = new File(path, fileName);
                     try (FileOutputStream fos = new FileOutputStream(file)) {
                         fos.write(data.getBytes());
                         fos.flush();
                     }
-                    
-                    // Refresh MediaScanner so file appears in "Downloads" app
                     MediaScannerConnection.scanFile(MainActivity.this, new String[]{file.getAbsolutePath()}, null, null);
                     onSaveComplete(fileName);
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Save Error: " + e.getMessage());
-                sendToJs("NATIVE_SAVE_ERROR: " + e.getMessage());
+                sendToJs("FILE_ERROR: " + e.getMessage());
             }
         }
 
         private void onSaveComplete(String fileName) {
             runOnUiThread(() -> {
-                Toast.makeText(MainActivity.this, "Trace Saved: " + fileName, Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "Trace Exported: " + fileName, Toast.LENGTH_SHORT).show();
                 showSystemNotification(fileName);
             });
-            sendToJs("NATIVE_SAVE: Success -> " + fileName);
+            sendToJs("NATIVE_SAVE: " + fileName);
         }
     }
 
     private void showSystemNotification(String fileName) {
         Intent intent = new Intent(this, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        
-        // Fix for Android 12+ PendingIntent requirements
         int flags = PendingIntent.FLAG_IMMUTABLE;
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
 

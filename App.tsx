@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, Pause, Cpu, ArrowLeft, Activity, Bluetooth, Zap, BarChart3, Database, LogOut, ExternalLink, LayoutDashboard, ShieldCheck } from 'lucide-react';
+import { Play, Pause, Cpu, ArrowLeft, Activity, Bluetooth, Zap, BarChart3, Database, LogOut, ExternalLink, LayoutDashboard, ShieldCheck, Settings2 } from 'lucide-react';
 import CANMonitor from '@/components/CANMonitor';
 import ConnectionPanel from '@/components/ConnectionPanel';
 import LibraryPanel from '@/components/LibraryPanel';
@@ -20,7 +20,8 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [view, setView] = useState<'home' | 'live'>('home');
-  const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis'>('trace');
+  // GATEWAY LOGIC: Default to 'link' manager
+  const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis'>('link');
   const [hardwareMode, setHardwareMode] = useState<'pcan' | 'esp32-serial' | 'esp32-bt'>('pcan');
   const [frames, setFrames] = useState<CANFrame[]>([]);
   const [latestFrames, setLatestFrames] = useState<Record<string, CANFrame>>({});
@@ -40,6 +41,17 @@ const App: React.FC = () => {
 
   const isAdmin = useMemo(() => user ? authService.isAdmin(user.email) : false, [user]);
 
+  // REDIRECT LOGIC: If connection drops, force user back to LINK tab
+  useEffect(() => {
+    if (bridgeStatus !== 'connected' && dashboardTab !== 'link') {
+      setDashboardTab('link');
+    }
+    // AUTOMATIC ROUTING: If we just connected and were on the 'link' tab, move to 'trace'
+    if (bridgeStatus === 'connected' && dashboardTab === 'link') {
+        setDashboardTab('trace');
+    }
+  }, [bridgeStatus, dashboardTab]);
+
   useEffect(() => {
     const stored = localStorage.getItem('osm_currentUser');
     const storedSid = localStorage.getItem('osm_sid');
@@ -48,7 +60,6 @@ const App: React.FC = () => {
       setSessionId(storedSid);
     }
 
-    // Diagnostic: Log Native Bridge Status
     setTimeout(() => {
         const isNative = !!(window as any).NativeBleBridge;
         addDebugLog(`SYS: Native Bridge Detected: ${isNative ? 'YES' : 'NO'}`);
@@ -91,10 +102,6 @@ const App: React.FC = () => {
     pendingFramesRef.current.push(newFrame);
   }, []);
 
-  /**
-   * ANDROID NATIVE BRIDGE RECOVERY
-   * Refined with packet reassembly to handle potential Bluetooth fragmentation.
-   */
   useEffect(() => {
     (window as any).onNativeBleLog = (msg: string) => addDebugLog(`BLE: ${msg}`);
     
@@ -105,7 +112,6 @@ const App: React.FC = () => {
     };
 
     (window as any).onNativeBleData = (chunk: string) => {
-      // BLE frames can sometimes be fragmented; reassemble based on newlines
       bleBufferRef.current += chunk;
       if (bleBufferRef.current.includes('\n')) {
         const lines = bleBufferRef.current.split('\n');
@@ -368,10 +374,21 @@ const App: React.FC = () => {
               <h2 className="text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
               {isAdmin && <span className="bg-indigo-600 text-white text-[7px] font-orbitron font-black px-1.5 py-0.5 rounded leading-none">ADMIN</span>}
             </div>
-            <span className="text-[8px] text-indigo-500 font-bold uppercase tracking-widest">{user.userName} / {sessionId}</span>
+            {/* SESSION_ID DISPLAY REMOVED PER USER REQUEST */}
+            <span className="text-[8px] text-indigo-500 font-bold uppercase tracking-widest">{user.userName}</span>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+           {/* GO BACK OPTION: Show settings button when connected to allow switching hardware */}
+           {bridgeStatus === 'connected' && (
+               <button 
+                 onClick={() => setDashboardTab('link')} 
+                 className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-[8px] font-orbitron font-black uppercase transition-all shadow-sm ${dashboardTab === 'link' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600'}`}
+               >
+                 <Settings2 size={12} />
+                 Link_Settings
+               </button>
+           )}
            <div className={`w-3 h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-300'}`} />
         </div>
       </header>
@@ -411,11 +428,19 @@ const App: React.FC = () => {
 
       <nav className="h-20 bg-white border-t flex items-center justify-around px-4 pb-2 shrink-0 safe-pb z-[100]">
         {[
-            { id: 'trace', icon: LayoutDashboard, label: 'DASHBOARD' },
             { id: 'link', icon: Bluetooth, label: 'LINK' },
+            { id: 'trace', icon: LayoutDashboard, label: 'DASHBOARD' },
             { id: 'library', icon: Database, label: 'DATA' },
             { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
-        ].map(tab => (
+        ].filter(tab => {
+          // DYNAMIC NAVIGATION:
+          // 1. If not connected, ONLY show LINK tab
+          if (bridgeStatus !== 'connected') {
+            return tab.id === 'link';
+          }
+          // 2. If connected, HIDE the LINK tab from the bottom nav (it's in the header now)
+          return tab.id !== 'link';
+        }).map(tab => (
             <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1.5 px-4 py-2 rounded-2xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400 hover:text-indigo-400'}`}>
                 <tab.icon size={20} /><span className="text-[8px] font-orbitron font-black uppercase">{tab.label}</span>
             </button>
