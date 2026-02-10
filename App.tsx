@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, Pause, Cpu, ArrowLeft, Activity, Bluetooth, Zap, BarChart3, Database, LogOut, ExternalLink, LayoutDashboard, ShieldCheck, Settings2 } from 'lucide-react';
+import { Play, Pause, Cpu, ArrowLeft, Activity, Bluetooth, Zap, BarChart3, Database, LogOut, ExternalLink, LayoutDashboard, ShieldCheck, Settings2, Smartphone, Tablet, Monitor } from 'lucide-react';
 import CANMonitor from '@/components/CANMonitor';
 import ConnectionPanel from '@/components/ConnectionPanel';
 import LibraryPanel from '@/components/LibraryPanel';
@@ -15,6 +15,8 @@ import { generateMockPacket } from '@/utils/canSim';
 
 const MAX_FRAME_LIMIT = 50000; 
 const BATCH_UPDATE_INTERVAL = 60; 
+
+type PreviewMode = 'full' | 'mobile' | 'tablet';
 
 const App: React.FC = () => {
   // Initialize state from localStorage to prevent auto-logout
@@ -32,6 +34,7 @@ const App: React.FC = () => {
   });
 
   const [view, setView] = useState<'home' | 'live'>('home');
+  const [previewMode, setPreviewMode] = useState<PreviewMode>('full');
   const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis'>('link');
   const [hardwareMode, setHardwareMode] = useState<'pcan' | 'esp32-serial' | 'esp32-bt'>('pcan');
   const [frames, setFrames] = useState<CANFrame[]>([]);
@@ -239,66 +242,130 @@ const App: React.FC = () => {
 
   if (!user) return <AuthScreen onAuthenticated={handleAuthenticated} />;
 
-  if (view === 'home') {
-    return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-white px-6">
-        <div className="bg-indigo-600 p-6 rounded-[32px] text-white shadow-2xl mb-12 animate-bounce"><Cpu size={64} /></div>
-        <h1 className="text-4xl md:text-8xl font-orbitron font-black text-slate-900 uppercase text-center">OSM <span className="text-indigo-600">LIVE</span></h1>
-        <div className="flex flex-col gap-4 w-full max-w-xs mt-12 text-center">
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.3em] mb-4">Operator: {user.userName}</p>
-          <button onClick={() => setView('live')} className="w-full py-6 bg-indigo-600 text-white rounded-3xl font-orbitron font-black uppercase shadow-2xl transition-all active:scale-95">Launch HUD</button>
-          <button onClick={handleLogout} className="w-full py-4 text-slate-400 font-bold uppercase text-[10px] tracking-widest flex items-center justify-center gap-2">Terminate Session</button>
+  const PreviewToggle = () => (
+    <div className="absolute top-6 right-6 z-[200] flex items-center gap-1 bg-white/80 backdrop-blur-md p-1.5 rounded-full shadow-xl border border-slate-200">
+      <button 
+        onClick={() => setPreviewMode('full')}
+        className={`p-2 rounded-full transition-all ${previewMode === 'full' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-100'}`}
+        title="Responsive View"
+      >
+        <Monitor size={18} />
+      </button>
+      <button 
+        onClick={() => setPreviewMode('tablet')}
+        className={`p-2 rounded-full transition-all ${previewMode === 'tablet' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-100'}`}
+        title="Tablet Preview"
+      >
+        <Tablet size={18} />
+      </button>
+      <button 
+        onClick={() => setPreviewMode('mobile')}
+        className={`p-2 rounded-full transition-all ${previewMode === 'mobile' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-100'}`}
+        title="Mobile Preview"
+      >
+        <Smartphone size={18} />
+      </button>
+    </div>
+  );
+
+  const renderContent = () => {
+    if (view === 'home') {
+      return (
+        <div className="h-full w-full flex flex-col items-center justify-center bg-white px-6 relative overflow-hidden">
+          <PreviewToggle />
+          <div className="bg-indigo-600 p-6 rounded-[32px] text-white shadow-2xl mb-12 animate-bounce"><Cpu size={64} /></div>
+          <h1 className="text-4xl md:text-8xl font-orbitron font-black text-slate-900 uppercase text-center">OSM <span className="text-indigo-600">LIVE</span></h1>
+          <div className="flex flex-col gap-4 w-full max-w-xs mt-12 text-center relative z-10">
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.3em] mb-4">Operator: {user.userName}</p>
+            <button onClick={() => setView('live')} className="w-full py-6 bg-indigo-600 text-white rounded-3xl font-orbitron font-black uppercase shadow-2xl transition-all active:scale-95">Launch HUD</button>
+            <button onClick={handleLogout} className="w-full py-4 text-slate-400 font-bold uppercase text-[10px] tracking-widest flex items-center justify-center gap-2">Terminate Session</button>
+          </div>
         </div>
+      );
+    }
+
+    return (
+      <div className="h-full w-full flex flex-col bg-slate-50 safe-pt overflow-hidden relative">
+        <header className="h-16 border-b flex items-center justify-between px-6 bg-white shrink-0 z-[100]">
+          <div className="flex items-center gap-4">
+            <button onClick={() => setView('home')} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={20} /></button>
+            <h2 className="text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
+          </div>
+          <div className={`w-3 h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : bridgeStatus === 'error' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-slate-300'}`} />
+        </header>
+
+        <main className="flex-1 overflow-hidden relative flex flex-col min-h-0">
+          {dashboardTab === 'link' ? (
+            <ConnectionPanel 
+              status={bridgeStatus} 
+              hardwareMode={hardwareMode}
+              onSetHardwareMode={setHardwareMode} 
+              baudRate={baudRate} 
+              setBaudRate={setBaudRate}
+              onConnect={handleConnect} 
+              onDisconnect={disconnectHardware} 
+              debugLog={debugLog}
+            />
+          ) : dashboardTab === 'analysis' ? (
+            <TraceAnalysisDashboard frames={frames} library={library} />
+          ) : dashboardTab === 'trace' ? (
+            <div className="flex-1 flex flex-col overflow-hidden p-4 gap-4">
+               <SignalGauges data={gaugeData} />
+               <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} />
+            </div>
+          ) : (
+            <LibraryPanel library={library} onUpdateLibrary={setLibrary} latestFrames={latestFrames} />
+          )}
+        </main>
+
+        <nav className="h-20 bg-white border-t flex items-center justify-around px-4 pb-2 shrink-0 safe-pb z-[100]">
+          {[
+              { id: 'link', icon: Bluetooth, label: 'LINK' },
+              { id: 'trace', icon: LayoutDashboard, label: 'DASHBOARD' },
+              { id: 'library', icon: Database, label: 'DATA' },
+              { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
+          ].map(tab => (
+              <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1.5 px-4 py-2 rounded-2xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}>
+                  <tab.icon size={20} /><span className="text-[8px] font-orbitron font-black uppercase">{tab.label}</span>
+              </button>
+          ))}
+        </nav>
       </div>
     );
+  };
+
+  // Device Frame Wrapper Logic
+  if (previewMode === 'full') {
+    return <div className="h-screen w-full">{renderContent()}</div>;
   }
 
   return (
-    <div className="h-screen w-full flex flex-col bg-slate-50 safe-pt">
-      <header className="h-16 border-b flex items-center justify-between px-6 bg-white shrink-0 z-[100]">
-        <div className="flex items-center gap-4">
-          <button onClick={() => setView('home')} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={20} /></button>
-          <h2 className="text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
+    <div className="h-screen w-full flex items-center justify-center bg-slate-200 overflow-hidden p-4 lg:p-12 relative">
+      {/* Background Grid for preview mode focus */}
+      <div className="absolute inset-0 opacity-10 pointer-events-none">
+        <div className="w-full h-full" style={{ backgroundImage: 'linear-gradient(to right, #4f46e5 1px, transparent 1px), linear-gradient(to bottom, #4f46e5 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
+      </div>
+      
+      {/* Dynamic Selector remains floating on top */}
+      <PreviewToggle />
+
+      <div 
+        className={`relative bg-white shadow-[0_50px_100px_-20px_rgba(0,0,0,0.3)] border-8 border-slate-900 transition-all duration-500 ease-in-out flex flex-col
+          ${previewMode === 'mobile' ? 'w-[375px] h-[812px] rounded-[3rem]' : 'w-[820px] h-[1080px] rounded-[2rem]'}`}
+      >
+        {/* Device Features (Speaker/Camera) */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-7 bg-slate-900 rounded-b-2xl z-[250] flex items-center justify-center gap-2">
+            <div className="w-8 h-1 bg-slate-800 rounded-full"></div>
+            <div className="w-2 h-2 bg-slate-800 rounded-full"></div>
         </div>
-        <div className={`w-3 h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : bridgeStatus === 'error' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-slate-300'}`} />
-      </header>
 
-      <main className="flex-1 overflow-hidden relative flex flex-col min-h-0">
-        {dashboardTab === 'link' ? (
-          <ConnectionPanel 
-            status={bridgeStatus} 
-            hardwareMode={hardwareMode}
-            onSetHardwareMode={setHardwareMode} 
-            baudRate={baudRate} 
-            setBaudRate={setBaudRate}
-            onConnect={handleConnect} 
-            onDisconnect={disconnectHardware} 
-            debugLog={debugLog}
-          />
-        ) : dashboardTab === 'analysis' ? (
-          <TraceAnalysisDashboard frames={frames} library={library} />
-        ) : dashboardTab === 'trace' ? (
-          <div className="flex-1 flex flex-col overflow-hidden p-4 gap-4">
-             <SignalGauges data={gaugeData} />
-             <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} />
-          </div>
-        ) : (
-          <LibraryPanel library={library} onUpdateLibrary={setLibrary} latestFrames={latestFrames} />
-        )}
-      </main>
+        <div className="flex-1 overflow-hidden relative">
+          {renderContent()}
+        </div>
 
-      <nav className="h-20 bg-white border-t flex items-center justify-around px-4 pb-2 shrink-0 safe-pb z-[100]">
-        {[
-            { id: 'link', icon: Bluetooth, label: 'LINK' },
-            { id: 'trace', icon: LayoutDashboard, label: 'DASHBOARD' },
-            { id: 'library', icon: Database, label: 'DATA' },
-            { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
-        ].map(tab => (
-            <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1.5 px-4 py-2 rounded-2xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}>
-                <tab.icon size={20} /><span className="text-[8px] font-orbitron font-black uppercase">{tab.label}</span>
-            </button>
-        ))}
-      </nav>
+        {/* Home Indicator */}
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-32 h-1 bg-slate-900/10 rounded-full z-[250]"></div>
+      </div>
     </div>
   );
 };
