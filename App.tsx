@@ -294,6 +294,17 @@ const App: React.FC = () => {
     } catch (err: any) { setBridgeStatus('disconnected'); }
   };
 
+  const initiateBleConnection = useCallback(() => {
+    setBridgeStatus('connecting');
+    addDebugLog("SYS: Initializing BLE Link...");
+    if ((window as any).NativeBleBridge) {
+      (window as any).NativeBleBridge.startBleLink();
+    } else {
+      addDebugLog("ERROR: Native Bridge unavailable.");
+      setBridgeStatus('error');
+    }
+  }, [addDebugLog]);
+
   if (!user) return <AuthScreen onAuthenticated={handleAuth} />;
 
   if (view === 'home') {
@@ -357,7 +368,7 @@ const App: React.FC = () => {
             setBaudRate={setBaudRate}
             onConnect={() => {
                 if (hardwareMode === 'esp32-serial') connectSerial();
-                else if (hardwareMode === 'esp32-bt') (window as any).NativeBleBridge?.startBleLink();
+                else if (hardwareMode === 'esp32-bt') initiateBleConnection();
             }} 
             onDisconnect={disconnectHardware} 
             debugLog={debugLog}

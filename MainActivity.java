@@ -5,7 +5,6 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
@@ -44,8 +43,6 @@ import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
-import androidx.core.app.NotificationCompat;
-import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 
 import java.io.File;
@@ -62,12 +59,16 @@ public class MainActivity extends AppCompatActivity {
     private BluetoothLeScanner bluetoothLeScanner;
     private BluetoothGatt bluetoothGatt;
     private static final int PERMISSION_REQUEST_CODE = 1234;
+    private static final int REQUEST_ENABLE_BT = 5678;
     private static final String TAG = "OSM_NATIVE_BLE";
     private static final String CHANNEL_ID = "OSM_FILE_EXPORTS";
 
     private static final UUID UART_SERVICE_UUID = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
     private static final UUID TX_CHAR_UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
     private static final UUID CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+
+    private Handler scanHandler = new Handler(Looper.getMainLooper());
+    private boolean isScanning = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -76,7 +77,9 @@ public class MainActivity extends AppCompatActivity {
         webView = findViewById(R.id.webView);
 
         BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
-        bluetoothAdapter = bluetoothManager.getAdapter();
+        if (bluetoothManager != null) {
+            bluetoothAdapter = bluetoothManager.getAdapter();
+        }
 
         createNotificationChannel();
         checkAndRequestPermissions();
@@ -155,17 +158,39 @@ public class MainActivity extends AppCompatActivity {
     public class NativeBleBridge {
         @JavascriptInterface
         public void startBleLink() {
-            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
-                sendToJs("STATE_ERROR: Bluetooth is DISABLED.");
+            if (bluetoothAdapter == null) {
+                sendToJs("STATE_ERROR: Bluetooth Hardware not found.");
                 return;
             }
+
+            if (!bluetoothAdapter.isEnabled()) {
+                sendToJs("STATE_ERROR: Bluetooth is OFF. Requesting enable...");
+                Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+                if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                    startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
+                } else {
+                    sendToJs("STATE_ERROR: BLUETOOTH_CONNECT Permission denied.");
+                }
+                return;
+            }
+
             if (!isLocationEnabled()) {
-                sendToJs("STATE_ERROR: Location Services are OFF.");
+                sendToJs("STATE_ERROR: Location Services are OFF. Please turn them ON for BLE.");
                 startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
                 return;
             }
 
             bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+            if (bluetoothLeScanner == null) {
+                sendToJs("STATE_ERROR: Scanner not available. Wait and retry.");
+                return;
+            }
+
+            if (isScanning) {
+                sendToJs("SCAN_RETRY: Already scanning.");
+                return;
+            }
+
             sendToJs("SCAN_INIT: Seeking OSM_CAN devices...");
 
             ScanSettings settings = new ScanSettings.Builder()
@@ -173,14 +198,33 @@ public class MainActivity extends AppCompatActivity {
                     .build();
 
             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
+                isScanning = true;
                 bluetoothLeScanner.startScan(null, settings, scanCallback);
+                
+                // Stop scanning after 15 seconds to save battery
+                scanHandler.postDelayed(() -> {
+                    if (isScanning) {
+                        stopBleScan();
+                        sendToJs("SCAN_TIMEOUT: No OSM devices found in range.");
+                    }
+                }, 15000);
             } else {
                 sendToJs("STATE_ERROR: BLE Scan Permission denied.");
             }
         }
 
+        private void stopBleScan() {
+            if (isScanning && bluetoothLeScanner != null) {
+                if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
+                    bluetoothLeScanner.stopScan(scanCallback);
+                }
+                isScanning = false;
+            }
+        }
+
         @JavascriptInterface
         public void disconnectBle() {
+            stopBleScan();
             if (bluetoothGatt != null) {
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                     bluetoothGatt.disconnect();
@@ -196,12 +240,26 @@ public class MainActivity extends AppCompatActivity {
             BluetoothDevice device = result.getDevice();
             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                 String name = device.getName();
-                if (name != null && (name.contains("OSM") || name.contains("ESP32") || name.contains("CAN"))) {
-                    sendToJs("TARGET_FOUND: Linking with " + name);
-                    bluetoothLeScanner.stopScan(scanCallback);
-                    connectToDevice(device);
+                if (name != null) {
+                    Log.d(TAG, "Found BLE: " + name);
+                    sendToJs("DEVICE_FOUND: " + name + " (" + device.getAddress() + ")");
+                    
+                    if (name.contains("OSM") || name.contains("ESP32") || name.contains("CAN")) {
+                        sendToJs("TARGET_LINKING: " + name);
+                        if (isScanning) {
+                            bluetoothLeScanner.stopScan(scanCallback);
+                            isScanning = false;
+                        }
+                        connectToDevice(device);
+                    }
                 }
             }
+        }
+
+        @Override
+        public void onScanFailed(int errorCode) {
+            isScanning = false;
+            sendToJs("SCAN_ERROR: Code " + errorCode);
         }
     };
 
@@ -217,16 +275,30 @@ public class MainActivity extends AppCompatActivity {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 sendToJs("GATT: Handshake initiated...");
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                    gatt.requestMtu(512);
+                    // Slight delay to ensure connection is stable before MTU request
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                            gatt.requestMtu(512);
+                        }
+                    }, 500);
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 sendToJs("GATT: Terminated.");
                 evaluateJs("window.onNativeBleStatus('disconnected')");
+                if (bluetoothGatt != null) {
+                    if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                        bluetoothGatt.close();
+                    }
+                    bluetoothGatt = null;
+                }
             }
         }
 
         @Override
         public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                sendToJs("GATT_MTU: Negotiated " + mtu + " bytes.");
+            }
             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                 gatt.discoverServices();
             }
@@ -247,10 +319,18 @@ public class MainActivity extends AppCompatActivity {
                                 gatt.writeDescriptor(descriptor);
                                 sendToJs("LINK_ESTABLISHED: Streaming active.");
                                 evaluateJs("window.onNativeBleStatus('connected')");
+                            } else {
+                                sendToJs("GATT_ERROR: Missing CCID Descriptor.");
                             }
                         }
+                    } else {
+                        sendToJs("GATT_ERROR: TX Characteristic not found.");
                     }
+                } else {
+                    sendToJs("GATT_ERROR: UART Service not found on this device.");
                 }
+            } else {
+                sendToJs("GATT_ERROR: Service discovery failed (" + status + ")");
             }
         }
 
@@ -258,7 +338,6 @@ public class MainActivity extends AppCompatActivity {
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             if (TX_CHAR_UUID.equals(characteristic.getUuid())) {
                 String data = new String(characteristic.getValue());
-                // Crucial: Handle fragmented packets by escaping newlines
                 evaluateJs("window.onNativeBleData('" + data.replace("\n", "\\n").replace("\r", "") + "')");
             }
         }
