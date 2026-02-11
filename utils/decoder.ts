@@ -2,6 +2,15 @@
 import { DBCSignal } from '../types.ts';
 
 /**
+ * Strips technical prefixes (LV_ID_0x...) and formats underscores to spaces.
+ */
+export function cleanMessageName(name: string): string {
+  if (!name) return "";
+  // Removes pattern like "LV_ID_0x18FF0360_" case-insensitively
+  return name.replace(/^LV_ID_0x[0-9A-F]+_/i, '').replace(/_/g, ' ').trim();
+}
+
+/**
  * Normalizes any ID to a clean Hex string.
  * @param id The raw ID string or number.
  * @param forceHex If true, treats numeric-only strings as Hex (used for Bus data).

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Zap, Cpu, Loader2, Bluetooth, Cable, Globe, AlertCircle, Settings, Info, Terminal } from 'lucide-react';
+import { Zap, Cpu, Loader2, Bluetooth, Cable, Globe, AlertCircle, Settings, Info, ShieldCheck, Wifi, WifiOff, Search } from 'lucide-react';
 import { ConnectionStatus, HardwareStatus } from '../types.ts';
 
 interface ConnectionPanelProps {
@@ -29,9 +29,57 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
     setIsNative(!!(window as any).NativeBleBridge);
   }, []);
 
-  const isCode2Error = useMemo(() => {
-    return debugLog.some(log => log.includes('Code 2') || log.includes('Saturated'));
-  }, [debugLog]);
+  const isStackFull = useMemo(() => debugLog.some(log => log.includes('Code 2')), [debugLog]);
+  const isTimeout = useMemo(() => debugLog.some(log => log.includes('TIMEOUT')), [debugLog]);
+  const isPermissionError = useMemo(() => debugLog.some(log => log.includes('denied') || log.includes('Permission')), [debugLog]);
+
+  const getStatusDetail = () => {
+    if (status === 'connected') return {
+      title: "LINK_ESTABLISHED",
+      desc: "Native Bridge active. Telemetry stream is live and secured.",
+      icon: <Wifi className="text-emerald-500" size={24} />,
+      color: "bg-emerald-50 border-emerald-100 text-emerald-700"
+    };
+    if (status === 'connecting') return {
+      title: "HANDSHAKING...",
+      desc: "Negotiating protocol with ESP32 gateway. Ensure hardware is within 2 meters.",
+      icon: <Loader2 className="text-indigo-500 animate-spin" size={24} />,
+      color: "bg-indigo-50 border-indigo-100 text-indigo-700"
+    };
+    if (isStackFull) return {
+      title: "SYSTEM_STACK_FAULT",
+      desc: "Android Bluetooth stack is saturated. Fix: Toggle Bluetooth OFF/ON in System Settings.",
+      icon: <AlertCircle className="text-red-500" size={24} />,
+      color: "bg-red-50 border-red-100 text-red-700"
+    };
+    if (isTimeout) return {
+      title: "HARDWARE_NOT_FOUND",
+      desc: "Search timeout reached. Ensure ESP32 is powered and flashing its status LED.",
+      icon: <Search className="text-amber-500" size={24} />,
+      color: "bg-amber-50 border-amber-100 text-amber-700"
+    };
+    if (isPermissionError) return {
+      title: "ACCESS_DENIED",
+      desc: "Hardware permissions were rejected. Check browser or OS privacy settings.",
+      icon: <ShieldCheck className="text-red-500" size={24} />,
+      color: "bg-red-50 border-red-100 text-red-700"
+    };
+    if (status === 'error') return {
+      title: "BRIDGE_ERROR",
+      desc: "An unexpected fault occurred in the hardware bridge. Check physical connections.",
+      icon: <AlertCircle className="text-red-500" size={24} />,
+      color: "bg-red-50 border-red-100 text-red-700"
+    };
+    
+    return {
+      title: "READY_FOR_LINK",
+      desc: "Hardware is currently offline. Select a mode and establish link to begin capture.",
+      icon: <WifiOff className="text-slate-300" size={24} />,
+      color: "bg-slate-50 border-slate-100 text-slate-500"
+    };
+  };
+
+  const currentStatus = getStatusDetail();
 
   const handleOpenSettings = () => {
     if ((window as any).NativeBleBridge?.openBluetoothSettings) {
@@ -51,8 +99,8 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                 </h3>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Unified Hardware Bridge</p>
               </div>
-              <div className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest ${status === 'connected' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : status === 'error' || isCode2Error ? 'bg-red-50 text-red-600 border-red-100' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
-                {isCode2Error ? 'FAULT_CODE_2' : status}
+              <div className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest ${status === 'connected' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : status === 'error' || isStackFull ? 'bg-red-50 text-red-600 border-red-100' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                {status}
               </div>
             </div>
 
@@ -77,41 +125,26 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               </button>
             </div>
 
-            {isCode2Error && (
-              <div className="mb-6 p-6 bg-red-600 rounded-3xl text-white animate-in zoom-in duration-300 shadow-xl">
-                <div className="flex items-center gap-3 mb-3">
-                  <AlertCircle size={24} />
-                  <h4 className="text-[12px] font-orbitron font-black uppercase tracking-widest">SYSTEM STACK FULL</h4>
-                </div>
-                <p className="text-[10px] font-medium leading-relaxed mb-4 opacity-90">
-                  Android's Bluetooth stack has reached its limit. <br/>
-                  <b>Fix:</b> Toggle Bluetooth OFF and ON in your system settings.
-                </p>
-                <button onClick={handleOpenSettings} className="w-full py-3 bg-white text-red-600 rounded-xl text-[10px] font-orbitron font-black uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg">
-                  <Settings size={14} /> Open System Settings
-                </button>
-              </div>
-            )}
-
-            <div className="mb-8 p-6 bg-slate-900 rounded-[32px] border border-slate-800 shadow-inner">
-               <div className="flex items-center gap-2 mb-4 text-slate-500">
-                  <Terminal size={12} />
-                  <span className="text-[9px] font-orbitron font-black uppercase tracking-widest">Bridge_Console</span>
+            {/* Link Intelligence Area - Replaces Bridge Console */}
+            <div className={`mb-8 p-6 rounded-[32px] border transition-all duration-500 shadow-inner ${currentStatus.color}`}>
+               <div className="flex items-center gap-4 mb-3">
+                  <div className="p-2.5 bg-white rounded-2xl shadow-sm">
+                    {currentStatus.icon}
+                  </div>
+                  <div>
+                    <h4 className="text-[12px] font-orbitron font-black uppercase tracking-widest">{currentStatus.title}</h4>
+                    <p className="text-[9px] font-bold opacity-60">Status ID: {status.toUpperCase()}</p>
+                  </div>
                </div>
-               <div className="h-24 overflow-y-auto custom-scrollbar flex flex-col gap-2">
-                  {debugLog.length === 0 ? (
-                    <p className="text-[9px] font-mono text-slate-600 uppercase tracking-widest italic mt-2">Awaiting system status...</p>
-                  ) : (
-                    debugLog.slice(0, 10).map((log, i) => (
-                      <div key={i} className="flex gap-3 text-[10px] font-mono">
-                         <span className="text-slate-600 shrink-0">[{debugLog.length - i}]</span>
-                         <span className={log.includes('ERROR') || log.includes('FAIL') ? 'text-red-400' : log.includes('MATCH') || log.includes('ACTIVE') ? 'text-emerald-400' : 'text-slate-300'}>
-                           {log.replace(/^\[.*?\]\s*/, '')}
-                         </span>
-                      </div>
-                    ))
-                  )}
-               </div>
+               <p className="text-[11px] font-medium leading-relaxed">
+                  {currentStatus.desc}
+               </p>
+               
+               {isStackFull && (
+                 <button onClick={handleOpenSettings} className="w-full mt-4 py-3 bg-white text-red-600 rounded-xl text-[10px] font-orbitron font-black uppercase tracking-widest flex items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all">
+                   <Settings size={14} /> Open System Settings
+                 </button>
+               )}
             </div>
           </div>
 

@@ -1,19 +1,29 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { CANFrame, SignalAnalysis } from '../types.ts';
-import { analyzeCANData } from '../services/geminiService.ts';
-import { AlertCircle, BrainCircuit, ExternalLink, Loader2, CheckCircle2, Unlock, Lock, ArrowDownToLine } from 'lucide-react';
-import { User } from '../services/authService.ts';
+import { AlertCircle, BrainCircuit, Unlock, Lock, ArrowDownToLine, Radar, Zap, ShieldAlert, Loader2 } from 'lucide-react';
 
+// Added lifted state props to match App.tsx requirements
 interface AIDiagnosticsProps {
   currentFrames: CANFrame[];
+  analysis: (SignalAnalysis & { isAutomatic?: boolean }) | null;
+  loading: boolean;
+  onManualAnalyze: () => void;
+  watcherActive: boolean;
+  setWatcherActive: (active: boolean) => void;
 }
 
-const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ currentFrames }) => {
-  const [loading, setLoading] = useState(false);
-  const [analysis, setAnalysis] = useState<SignalAnalysis | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
+const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ 
+  currentFrames,
+  analysis,
+  loading,
+  onManualAnalyze,
+  watcherActive,
+  setWatcherActive
+}) => {
+  // Use lifted states from props instead of local ones to synchronize with App.tsx
+  const [autoScroll, setAutoScroll] = React.useState(true);
+  const [error] = React.useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -21,28 +31,6 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ currentFrames }) => {
       contentRef.current.scrollTop = contentRef.current.scrollHeight;
     }
   }, [analysis, autoScroll]);
-
-  const handleAnalyze = async () => {
-    if (currentFrames.length === 0) return;
-    setLoading(true);
-    setError(null);
-    
-    // Retrieve operator metadata from localStorage for logging
-    // Fixed: Using correct key 'osm_currentUser' as defined in App.tsx session persistence
-    const storedUser = localStorage.getItem('osm_currentUser');
-    const storedSid = localStorage.getItem('osm_sid');
-    const user: User | undefined = storedUser ? JSON.parse(storedUser) : undefined;
-    const sid: string | undefined = storedSid || undefined;
-
-    try {
-      const result = await analyzeCANData(currentFrames, user, sid);
-      setAnalysis(result);
-    } catch (err) {
-      setError("Failed to generate AI analysis. Please check your API key.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const scrollToBottom = () => {
     if (contentRef.current) {
@@ -54,10 +42,25 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ currentFrames }) => {
     <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col h-full overflow-hidden max-h-full shadow-lg">
       <div className="flex items-center justify-between mb-4 shrink-0">
         <div className="flex flex-col">
-          <h2 className="text-[10px] font-orbitron font-black text-slate-800 uppercase tracking-widest">Gemini_Insight</h2>
-          <p className="text-[8px] text-indigo-500 font-bold uppercase tracking-widest mt-0.5">Tactical_Signal_Logic</p>
+          <h2 className="text-[10px] font-orbitron font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+            Gemini_Insight {watcherActive && <Radar size={12} className="text-indigo-600 animate-pulse" />}
+          </h2>
+          <p className="text-[8px] text-indigo-500 font-bold uppercase tracking-widest mt-0.5">
+            {watcherActive ? 'AUTONOMOUS_WATCHER_ACTIVE' : 'Tactical_Signal_Logic'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setWatcherActive(!watcherActive)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[8px] font-orbitron font-black uppercase transition-all border shadow-sm ${
+              watcherActive ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-slate-200 text-slate-400'
+            }`}
+            title="Toggle Autonomous Fault Monitoring"
+          >
+            <Radar size={12} className={watcherActive ? 'animate-spin' : ''} />
+            {watcherActive ? 'WATCHER_ON' : 'WATCHER_OFF'}
+          </button>
+          
           <button
             onClick={() => setAutoScroll(!autoScroll)}
             className={`p-1.5 rounded border transition-all shadow-sm ${autoScroll ? 'bg-indigo-600 border-indigo-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-400'}`}
@@ -65,7 +68,7 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ currentFrames }) => {
             {autoScroll ? <Unlock size={12} /> : <Lock size={12} />}
           </button>
           <button
-            onClick={handleAnalyze}
+            onClick={onManualAnalyze}
             disabled={loading || currentFrames.length === 0}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-[9px] font-orbitron font-black uppercase tracking-widest rounded-lg transition-all active:scale-95 shadow-md"
           >
@@ -80,8 +83,11 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ currentFrames }) => {
           <div className="flex flex-col items-center justify-center h-48 space-y-4">
             <div className="relative">
               <div className="w-12 h-12 border-2 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
+              <BrainCircuit className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-600" size={20} />
             </div>
-            <p className="text-slate-400 text-[9px] font-orbitron font-black uppercase tracking-[0.3em] animate-pulse">Scanning_Patterns...</p>
+            <p className="text-slate-400 text-[9px] font-orbitron font-black uppercase tracking-[0.3em] animate-pulse">
+              {analysis?.isAutomatic ? 'INTERCEPTING_ANOMALY...' : 'Scanning_Patterns...'}
+            </p>
           </div>
         )}
 
@@ -94,14 +100,26 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ currentFrames }) => {
 
         {!loading && !analysis && !error && (
           <div className="text-center py-12 border-2 border-dashed border-slate-100 rounded-2xl flex flex-col items-center justify-center">
+             <div className="p-4 bg-slate-50 rounded-full mb-4">
+               <ShieldAlert className="w-8 h-8 text-slate-200" />
+             </div>
             <p className="text-slate-300 text-[9px] font-orbitron font-black uppercase tracking-widest max-w-[180px]">
-              Establish_Hardware_Link_To_Analyze_Frames
+              {watcherActive ? 'AWAITING_ANOMALY_TRIGGER' : 'Establish_Hardware_Link_To_Analyze_Frames'}
             </p>
           </div>
         )}
 
         {analysis && !loading && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 pb-6">
+            {analysis.isAutomatic && (
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl flex items-center gap-3 animate-pulse shadow-sm">
+                 <div className="p-1.5 bg-amber-600 text-white rounded-lg">
+                   <Zap size={14} />
+                 </div>
+                 <span className="text-[10px] font-orbitron font-black text-amber-800 uppercase">Automated_Anomaly_Intercept</span>
+              </div>
+            )}
+
             <div>
               <h4 className="text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest mb-3 border-l-2 border-emerald-500 pl-3">Detected_Protocols</h4>
               <div className="flex flex-wrap gap-2">
@@ -114,8 +132,11 @@ const AIDiagnostics: React.FC<AIDiagnosticsProps> = ({ currentFrames }) => {
             </div>
 
             <div className="space-y-3">
-              <h4 className="text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest mb-3 border-l-2 border-indigo-600 pl-3">Signal_Summary</h4>
-              <div className="text-[11px] text-slate-800 leading-relaxed font-mono bg-slate-50 p-5 rounded-xl border border-slate-100 whitespace-pre-wrap shadow-inner">
+              <h4 className="text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest mb-3 border-l-2 border-indigo-600 pl-3">Signal_Summary_&_Impact</h4>
+              <div className="text-[11px] text-slate-800 leading-relaxed font-mono bg-slate-50 p-5 rounded-xl border border-slate-100 whitespace-pre-wrap shadow-inner relative">
+                <div className="absolute top-4 right-4 opacity-10">
+                  <BrainCircuit size={40} />
+                </div>
                 {analysis.summary}
               </div>
             </div>

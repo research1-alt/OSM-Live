@@ -1,6 +1,5 @@
 
 import React from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface SignalGaugesProps {
   data: { rpm: number; temp: number; throttle: number; timestamp: number }[];
@@ -25,24 +24,6 @@ const SignalGauges: React.FC<SignalGaugesProps> = ({ data }) => {
         <Gauge label="Motor Speed" value={Math.round(latest.rpm)} unit="RPM" color="text-indigo-600" bgColor="bg-indigo-50/30" />
         <Gauge label="Core Temp" value={latest.temp.toFixed(1)} unit="°C" color="text-amber-600" bgColor="bg-amber-50/30" />
         <Gauge label="Throttle" value={Math.round(latest.throttle)} unit="%" color="text-emerald-600" bgColor="bg-emerald-50/30" />
-      </div>
-      
-      <div className="bg-white p-3 rounded-2xl border border-slate-200 h-32 shadow-sm relative overflow-hidden">
-        <div className="absolute top-2 left-3 z-10">
-          <h3 className="text-slate-400 text-[7px] font-black uppercase tracking-widest">Live_Waveform (RPM)</h3>
-        </div>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data.slice(-50)}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            <XAxis hide dataKey="timestamp" />
-            <YAxis hide domain={[0, 'auto']} />
-            <Tooltip 
-              contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', border: 'none', borderRadius: '12px', fontSize: '9px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-              labelStyle={{ display: 'none' }}
-            />
-            <Line type="monotone" dataKey="rpm" stroke="#4f46e5" strokeWidth={3} dot={false} isAnimationActive={false} />
-          </LineChart>
-        </ResponsiveContainer>
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Database, Plus, Trash2, RefreshCw, Box, Settings2, ArrowUpToLine, ArrowDownToLine, Zap, Activity, Info, Lock, Unlock, Hash, ShieldAlert, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { ConversionLibrary, DBCMessage, DBCSignal, CANFrame } from '../types.ts';
 import { MY_CUSTOM_DBC } from '../data/dbcProfiles.ts';
-import { decToHex, normalizeId, decodeSignal } from '../utils/decoder.ts';
+import { decToHex, normalizeId, decodeSignal, cleanMessageName } from '../utils/decoder.ts';
 
 interface LibraryPanelProps {
   library: ConversionLibrary;
@@ -37,19 +37,17 @@ const LibraryPanel: React.FC<LibraryPanelProps> = ({ library, onUpdateLibrary, l
         if (!hasActiveError) return; 
       }
 
-      const hexIdDisplay = decToHex(decId);
-      const nameMatches = message.name.toLowerCase().includes(searchLower);
-      const idMatches = hexIdDisplay.toLowerCase().includes(searchLower);
+      const cleanName = cleanMessageName(message.name);
+      const nameMatches = cleanName.toLowerCase().includes(searchLower);
       const hasMatchingSignal = Object.values(message.signals).some(sig => 
         sig.name.toLowerCase().includes(searchLower)
       );
       
-      if (searchTerm === '' || nameMatches || idMatches || hasMatchingSignal) {
+      if (searchTerm === '' || nameMatches || hasMatchingSignal) {
         active.push({ id: decId, message, isFaultMessage });
       }
     });
-    // Fix: access b.message.name instead of b.name to match the object structure in active array (line 51 fix)
-    return active.sort((a, b) => a.message.name.localeCompare(b.message.name));
+    return active.sort((a, b) => cleanMessageName(a.message.name).localeCompare(cleanMessageName(b.message.name)));
   }, [library.database, latestFrames, searchTerm]);
 
   useEffect(() => {
@@ -88,7 +86,7 @@ const LibraryPanel: React.FC<LibraryPanelProps> = ({ library, onUpdateLibrary, l
               placeholder="SEARCH_LOGIC..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-[10px] font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500/50 w-64 uppercase tracking-widest transition-all"
+              className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-[10px] font-mono text-slate-800 placeholder:text-slate-300 focus:outline-none focus:border-indigo-500/50 w-64 uppercase tracking-widest transition-all"
             />
           </div>
         </div>
@@ -128,7 +126,6 @@ const LibraryPanel: React.FC<LibraryPanelProps> = ({ library, onUpdateLibrary, l
             {activeDBCMessages.map(({ id, message, isFaultMessage }) => {
               const normDbcId = normalizeId(id);
               const latestFrame = latestFrames[normDbcId];
-              const hexIdDisplay = decToHex(id);
               
               const signalsToRender = (Object.values(message.signals) as DBCSignal[]).filter(sig => {
                 if (isFaultMessage) {
@@ -164,10 +161,7 @@ const LibraryPanel: React.FC<LibraryPanelProps> = ({ library, onUpdateLibrary, l
                         <span className={`text-[12px] font-orbitron font-black uppercase tracking-wider block truncate pr-4 ${
                           isFaultMessage ? 'text-red-600' : 'text-slate-800'
                         }`}>
-                          {message.name}
-                        </span>
-                        <span className="text-[9px] font-mono text-slate-400 font-black uppercase tracking-widest flex items-center gap-1.5 mt-1">
-                          <Hash size={10} /> {hexIdDisplay}
+                          {cleanMessageName(message.name)}
                         </span>
                       </div>
                     </div>

@@ -14,22 +14,22 @@ export async function analyzeCANData(
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = 'gemini-3-pro-preview';
   
-  const frameSummary = frames.slice(0, 50).map(f => ({
+  const frameSummary = frames.slice(-50).map(f => ({
     id: f.id,
     data: f.data.join(' '),
     period: f.periodMs + 'ms'
   }));
 
   const prompt = `
-    As a senior automotive embedded engineer, analyze this snippet of CAN bus traffic captured from a PCAN interface.
+    As a senior automotive embedded engineer, analyze this snippet of CAN bus traffic captured from a vehicle.
     Frames: ${JSON.stringify(frameSummary)}
     
-    1. Identify the likely protocol (OBD-II, J1939, UDS, or proprietary).
-    2. Look for patterns in the data bytes that suggest specific signals.
-    3. Detect any timing anomalies or suspicious message ID patterns.
-    4. Suggest diagnostic steps.
+    1. Identify the likely protocol (OBD-II, J1939, UDS, or OSM proprietary).
+    2. Look for patterns in the data bytes that suggest specific signals or faults.
+    3. DETECT IMPACT: If an anomaly exists, explain exactly how the vehicle's behavior is affected (e.g., limp mode, loss of torque, thermal shutdown).
+    4. Suggest immediate diagnostic steps.
     
-    Provide your analysis in a structured format. Keep it concise.
+    Provide your analysis in a professional, structured format. Focus on operational impact.
   `;
 
   try {
@@ -41,8 +41,6 @@ export async function analyzeCANData(
     const text = response.text || "No analysis available.";
     const isUnclear = text.length < 50 || text.toLowerCase().includes("cannot determine") || text.toLowerCase().includes("anomaly");
 
-    // LOG TO SPREADSHEET VIA APPS SCRIPT
-    // Now logging both the Prompt AND the resulting AI Analysis
     if (user && sessionId) {
       authService.logQuery(user, prompt.substring(0, 500), text, isUnclear, sessionId).catch(console.error);
     }
@@ -50,8 +48,8 @@ export async function analyzeCANData(
     return {
       summary: text,
       detectedProtocols: text.toLowerCase().includes('j1939') ? ['J1939'] : text.toLowerCase().includes('obd') ? ['OBD-II'] : ['Generic CAN'],
-      anomalies: text.toLowerCase().includes('anomaly') ? ['Signal patterns identified as potential faults'] : [],
-      recommendations: "Verify bus load and check for potential termination resistor failure.",
+      anomalies: text.toLowerCase().includes('anomaly') || text.toLowerCase().includes('fault') ? ['Critical behavioral anomaly detected'] : [],
+      recommendations: "Consult technical manual for active fault codes and check bus termination.",
       sources: [] 
     };
   } catch (error) {
