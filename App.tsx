@@ -120,10 +120,15 @@ const App: React.FC = () => {
       }
 
       setBridgeStatus('connecting');
-      addDebugLog("SCAN: Requesting Device...");
+      addDebugLog("SCAN: Opening OS Bluetooth Picker...");
       
       const device = await (navigator as any).bluetooth.requestDevice({
-        filters: [{ services: [UART_SERVICE_UUID] }],
+        // Combined filters to increase visibility across different OS stacks
+        filters: [
+          { services: [UART_SERVICE_UUID] },
+          { namePrefix: "OSM" },
+          { namePrefix: "ESP32" }
+        ],
         optionalServices: [UART_SERVICE_UUID]
       });
 
@@ -178,8 +183,10 @@ const App: React.FC = () => {
       addDebugLog(`BLE_FAULT: ${err.message}`);
       setBridgeStatus('disconnected');
       
-      if (err.name === 'NetworkError' || err.message.includes('GATT')) {
-        addDebugLog("DESKTOP_FIX: Go to Windows/macOS Settings, UNPAIR the device, and try again.");
+      if (err.name === 'NotFoundError') {
+        addDebugLog("VISIBILITY: Device not found. Try 'Hard Reset' (unplug/replug) the ESP32.");
+      } else if (err.name === 'NetworkError' || err.message.includes('GATT')) {
+        addDebugLog("DESKTOP_FIX: Go to System Settings, UNPAIR the device, and try again.");
       }
     }
   };
@@ -309,7 +316,6 @@ const App: React.FC = () => {
               <ConnectionPanel 
                 status={bridgeStatus} 
                 hardwareMode={hardwareMode} 
-                // Fix: changed onSetHardwareMode={onSetHardwareMode} to onSetHardwareMode={setHardwareMode}
                 onSetHardwareMode={setHardwareMode} 
                 baudRate={baudRate} 
                 setBaudRate={setBaudRate} 

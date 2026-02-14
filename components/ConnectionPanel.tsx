@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Zap, Cpu, Loader2, Bluetooth, Cable, Globe, AlertCircle, Settings, Info, ShieldCheck, Wifi, WifiOff, Search, Monitor, Smartphone } from 'lucide-react';
+import { Zap, Cpu, Loader2, Bluetooth, Cable, Globe, AlertCircle, Settings, Info, ShieldCheck, Wifi, WifiOff, Search, Monitor, Smartphone, HelpCircle, RefreshCcw } from 'lucide-react';
 import { ConnectionStatus, HardwareStatus } from '../types.ts';
 
 interface ConnectionPanelProps {
@@ -24,6 +24,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   debugLog = []
 }) => {
   const [isNative, setIsNative] = useState(false);
+  const [showTroubleshooting, setShowTroubleshooting] = useState(false);
   const isDesktop = useMemo(() => !isNative && /Windows|Macintosh|Linux/.test(navigator.userAgent), [isNative]);
 
   useEffect(() => {
@@ -41,26 +42,26 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
     };
     if (status === 'connecting') return {
       title: "HANDSHAKING...",
-      desc: "Negotiating GATT protocol with hardware. Ensure distance < 2 meters.",
+      desc: "Negotiating GATT protocol with hardware. Check the popup list.",
       icon: <Loader2 className="text-indigo-500 animate-spin" size={24} />,
       color: "bg-indigo-50 border-indigo-100 text-indigo-700"
     };
     if (hasGattError && isDesktop) return {
       title: "DESKTOP_GATT_LOCK",
-      desc: "Device is locked by Windows/macOS. Go to System Bluetooth Settings and 'Remove' or 'Unpair' the device first.",
+      desc: "Device is locked by the OS. Unpair it from System Settings.",
       icon: <Monitor className="text-red-500" size={24} />,
       color: "bg-red-50 border-red-100 text-red-700"
     };
     if (status === 'error') return {
       title: "BRIDGE_ERROR",
-      desc: "Protocol fault in the hardware bridge. Reset ESP32 power and try again.",
+      desc: "Protocol fault. Reset ESP32 power and try again.",
       icon: <AlertCircle className="text-red-500" size={24} />,
       color: "bg-red-50 border-red-100 text-red-700"
     };
     
     return {
       title: "READY_FOR_LINK",
-      desc: "Link status is offline. Select mode and establish connection to begin.",
+      desc: "Link status is offline. Select mode to begin.",
       icon: <WifiOff className="text-slate-300" size={24} />,
       color: "bg-slate-50 border-slate-100 text-slate-500"
     };
@@ -69,61 +70,89 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   const currentStatus = getStatusDetail();
 
   return (
-    <div className="flex flex-col items-center justify-center w-full h-full max-w-5xl mx-auto py-10 px-4 overflow-y-auto">
+    <div className="flex flex-col items-center justify-center w-full h-full max-w-5xl mx-auto py-6 md:py-10 px-4 overflow-y-auto">
       <div className="w-full max-w-xl">
-        <div className="bg-white rounded-[40px] p-8 lg:p-12 shadow-2xl border border-slate-200 flex flex-col justify-between min-h-[500px]">
+        <div className="bg-white rounded-[40px] p-6 md:p-12 shadow-2xl border border-slate-200 flex flex-col justify-between min-h-[500px]">
           <div>
-            <div className="flex items-center justify-between mb-10">
+            <div className="flex items-center justify-between mb-8 md:mb-10">
               <div className="flex flex-col">
-                <h3 className="text-2xl font-orbitron font-black text-slate-900 uppercase flex items-center gap-4">
-                  <Cpu className="text-indigo-600" size={32} /> Link_Manager
+                <h3 className="text-xl md:text-2xl font-orbitron font-black text-slate-900 uppercase flex items-center gap-4">
+                  <Cpu className="text-indigo-600" size={28} /> Link_Manager
                 </h3>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Unified Hardware Bridge</p>
+                <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Hardware Interface</p>
               </div>
               <div className="flex items-center gap-2">
                  {isDesktop ? <Monitor size={14} className="text-slate-300" /> : <Smartphone size={14} className="text-slate-300" />}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mb-8">
+            <div className="grid grid-cols-2 gap-3 md:gap-4 mb-6 md:mb-8">
               <button 
                 onClick={() => onSetHardwareMode('esp32-serial')} 
                 disabled={true}
-                className={`flex flex-col items-center gap-3 p-5 rounded-[24px] border transition-all opacity-30 cursor-not-allowed bg-slate-50 border-slate-100 text-slate-400`}
+                className="flex flex-col items-center gap-3 p-4 md:p-5 rounded-[24px] border transition-all opacity-30 cursor-not-allowed bg-slate-50 border-slate-100 text-slate-400"
               >
-                <Cable size={24}/><span className="text-[9px] font-orbitron font-black uppercase">Wired (Soon)</span>
+                <Cable size={20}/><span className="text-[8px] font-orbitron font-black uppercase">Wired (Soon)</span>
               </button>
               <button 
                 onClick={() => onSetHardwareMode('esp32-bt')} 
-                className={`flex flex-col items-center gap-3 p-5 rounded-[24px] border transition-all ${hardwareMode === 'esp32-bt' ? 'bg-indigo-600 border-indigo-700 text-white shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'}`}
+                className={`flex flex-col items-center gap-3 p-4 md:p-5 rounded-[24px] border transition-all ${hardwareMode === 'esp32-bt' ? 'bg-indigo-600 border-indigo-700 text-white shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'}`}
               >
-                <Bluetooth size={24}/><span className="text-[9px] font-orbitron font-black uppercase">Bluetooth</span>
+                <Bluetooth size={20}/><span className="text-[8px] font-orbitron font-black uppercase">Bluetooth</span>
               </button>
             </div>
 
-            <div className={`mb-8 p-6 rounded-[32px] border transition-all duration-500 shadow-inner ${currentStatus.color}`}>
+            <div className={`mb-6 p-5 md:p-6 rounded-[32px] border transition-all duration-500 shadow-inner ${currentStatus.color}`}>
                <div className="flex items-center gap-4 mb-3">
-                  <div className="p-2.5 bg-white rounded-2xl shadow-sm">
+                  <div className="p-2 bg-white rounded-2xl shadow-sm">
                     {currentStatus.icon}
                   </div>
                   <div>
-                    <h4 className="text-[12px] font-orbitron font-black uppercase tracking-widest">{currentStatus.title}</h4>
+                    <h4 className="text-[11px] font-orbitron font-black uppercase tracking-widest">{currentStatus.title}</h4>
                   </div>
                </div>
-               <p className="text-[11px] font-medium leading-relaxed">
+               <p className="text-[10px] md:text-[11px] font-medium leading-relaxed">
                   {currentStatus.desc}
                </p>
-               
-               {isDesktop && status === 'disconnected' && (
-                 <div className="mt-4 pt-4 border-t border-slate-200/50">
-                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1">
-                      <Info size={10} /> Desktop Connectivity Tip
+            </div>
+
+            {/* Device Not Visible Troubleshooting */}
+            <div className="mb-6">
+              <button 
+                onClick={() => setShowTroubleshooting(!showTroubleshooting)}
+                className="flex items-center gap-2 text-[9px] font-orbitron font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-700 transition-colors"
+              >
+                <HelpCircle size={14} /> {showTroubleshooting ? 'HIDE_GUIDE' : 'DEVICE_NOT_VISIBLE?'}
+              </button>
+              
+              {showTroubleshooting && (
+                <div className="mt-4 space-y-3 bg-slate-50 p-5 rounded-3xl border border-slate-100 animate-in slide-in-from-top-2">
+                  <div className="flex gap-3">
+                    <div className="text-[9px] font-orbitron font-black text-indigo-600 bg-white w-5 h-5 flex items-center justify-center rounded-lg shadow-sm shrink-0">1</div>
+                    <p className="text-[10px] text-slate-600 font-medium leading-snug">
+                      <b>Check Settings:</b> Go to your laptop's Bluetooth settings. If you see your device paired there, <b>Remove</b> or <b>Unpair</b> it. The browser needs it to be "free".
                     </p>
-                    <p className="text-[10px] text-slate-500 italic">
-                      If the device shows in the list but fails to connect, ensure it is <b>not</b> paired in your OS Bluetooth settings.
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="text-[9px] font-orbitron font-black text-indigo-600 bg-white w-5 h-5 flex items-center justify-center rounded-lg shadow-sm shrink-0">2</div>
+                    <p className="text-[10px] text-slate-600 font-medium leading-snug">
+                      <b>Hard Reset:</b> Unplug the ESP32 from its power source and plug it back in. Wait 5 seconds for it to start advertising.
                     </p>
-                 </div>
-               )}
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="text-[9px] font-orbitron font-black text-indigo-600 bg-white w-5 h-5 flex items-center justify-center rounded-lg shadow-sm shrink-0">3</div>
+                    <p className="text-[10px] text-slate-600 font-medium leading-snug">
+                      <b>Close Tabs:</b> Ensure no other browser tabs or mobile apps are currently connected to the device.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => window.location.reload()}
+                    className="w-full mt-2 flex items-center justify-center gap-2 py-2 bg-white border border-slate-200 rounded-xl text-[9px] font-orbitron font-black text-slate-400 uppercase hover:text-indigo-600 hover:border-indigo-200 transition-all"
+                  >
+                    <RefreshCcw size={12} /> Force HUD Refresh
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -131,7 +160,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
             <button 
               onClick={() => status === 'connected' ? onDisconnect() : onConnect()} 
               disabled={status === 'connecting'} 
-              className={`w-full py-8 rounded-[24px] text-[13px] font-orbitron font-black uppercase tracking-[0.4em] shadow-2xl transition-all flex items-center justify-center gap-4 ${
+              className={`w-full py-6 md:py-8 rounded-[24px] text-[12px] md:text-[13px] font-orbitron font-black uppercase tracking-[0.4em] shadow-2xl transition-all flex items-center justify-center gap-4 ${
                 status === 'connected' ? 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100' : 
                 'bg-indigo-600 text-white hover:bg-indigo-700'
               }`}
