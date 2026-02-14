@@ -73,6 +73,7 @@ public class MainActivity extends AppCompatActivity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean isScanning = false;
 
+    // Temporary storage for file data during picker transition
     private String pendingFileData = "";
 
     private final ActivityResultLauncher<Intent> enableBtLauncher = registerForActivityResult(
@@ -96,7 +97,7 @@ public class MainActivity extends AppCompatActivity {
                         writeDataToUri(uri, pendingFileData);
                     }
                 }
-                pendingFileData = ""; 
+                pendingFileData = ""; // Clear buffer
             }
     );
 
@@ -149,28 +150,10 @@ public class MainActivity extends AppCompatActivity {
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
-        s.setDatabaseEnabled(true);
-        s.setAllowFileAccess(true);
-        
-        // OFFLINE PRIORITY SETTINGS
-        s.setCacheMode(WebSettings.LOAD_DEFAULT);
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            // Older Androids need explicit AppCache
-            s.setAppCacheEnabled(true);
-            s.setAppCachePath(getApplicationContext().getCacheDir().getAbsolutePath());
-        }
-
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         webView.addJavascriptInterface(new NativeBleBridge(), "NativeBleBridge");
         webView.addJavascriptInterface(new WebAppInterface(), "AndroidInterface");
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                // If network fails, try loading from cache explicitly
-                view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ONLY);
-                view.loadUrl(failingUrl);
-            }
-        });
+        webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(PermissionRequest r) { runOnUiThread(() -> r.grant(r.getResources())); }
@@ -217,7 +200,7 @@ public class MainActivity extends AppCompatActivity {
 
                 bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
                 if (bluetoothLeScanner == null) {
-                    sendToJs("ERROR: System Scanner not found.");
+                    sendToJs("ERROR: System Scanner not found. Bluetooth service busy.");
                     return;
                 }
 
@@ -235,6 +218,7 @@ public class MainActivity extends AppCompatActivity {
                         mainHandler.postDelayed(() -> {
                             if (isScanning) {
                                 stopCurrentScan();
+                                sendToJs("TIMEOUT: Bridge not found in 20s.");
                                 evaluateJs("window.onNativeBleStatus('disconnected')");
                             }
                         }, 20000);
@@ -259,6 +243,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 bluetoothGatt = null;
             }
+            sendToJs("STATE: Resources Purged.");
             evaluateJs("window.onNativeBleStatus('disconnected')");
         }
 
@@ -279,15 +264,27 @@ public class MainActivity extends AppCompatActivity {
             if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                 String name = device.getName();
                 if (name != null && (name.contains("OSM") || name.contains("ESP32") || name.contains("CAN"))) {
+                    sendToJs("MATCH: " + name + " found.");
                     new NativeBleBridge().stopCurrentScan();
                     connectToDevice(device);
                 }
             }
         }
+
+        @Override
+        public void onScanFailed(int errorCode) {
+            isScanning = false;
+            String msg = (errorCode == SCAN_FAILED_APPLICATION_REGISTRATION_FAILED) 
+                         ? "Code 2: Stack Full. Manual Reset Req." 
+                         : "Error Code " + errorCode;
+            sendToJs("SCAN_FAILED: " + msg);
+            evaluateJs("window.onNativeBleStatus('error')");
+        }
     };
 
     private void connectToDevice(BluetoothDevice device) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+            sendToJs("LINK: Contacting hardware...");
             bluetoothGatt = device.connectGatt(this, false, gattCallback);
         }
     }
@@ -296,7 +293,9 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                sendToJs("LINK: Handshake initiated.");
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                    // Delay MTU to allow internal stack preparation
                     mainHandler.postDelayed(() -> {
                         if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                             gatt.requestMtu(512);
@@ -304,12 +303,21 @@ public class MainActivity extends AppCompatActivity {
                     }, 1000);
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                sendToJs("LINK: Terminated.");
                 evaluateJs("window.onNativeBleStatus('disconnected')");
+                if (bluetoothGatt != null) {
+                    if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                        bluetoothGatt.close();
+                    }
+                    bluetoothGatt = null;
+                }
             }
         }
 
         @Override
         public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+            sendToJs("LINK: MTU Sync (" + mtu + " bytes)");
+            // Crucial: Wait before discovering services after MTU change
             mainHandler.postDelayed(() -> {
                 if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                     gatt.discoverServices();
@@ -330,10 +338,13 @@ public class MainActivity extends AppCompatActivity {
                             if (descriptor != null) {
                                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                                 gatt.writeDescriptor(descriptor);
+                                sendToJs("BRIDGE: Live stream active.");
                                 evaluateJs("window.onNativeBleStatus('connected')");
                             }
                         }
                     }
+                } else {
+                    sendToJs("ERROR: NUS Service not found on hardware.");
                 }
             }
         }
