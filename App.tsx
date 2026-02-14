@@ -43,7 +43,6 @@ const App: React.FC = () => {
   const [baudRate, setBaudRate] = useState(115200);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   
-  // Simulation is strictly OFF to avoid "farzi" (fake) messages
   const [simulationEnabled, setSimulationEnabled] = useState(false);
 
   // LIFTED PERSISTENT STATES
@@ -75,7 +74,6 @@ const App: React.FC = () => {
     setDebugLog(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
   }, []);
 
-  // AUTO-WATCHER ON CONNECTION
   useEffect(() => {
     if (bridgeStatus === 'connected') {
       setWatcherActive(true);
@@ -450,8 +448,16 @@ const App: React.FC = () => {
 
           <main className="flex-1 overflow-hidden relative flex flex-col min-h-0">
             {dashboardTab === 'link' ? (
-              // FIXED: Changed 'onSetHardwareMode={onSetHardwareMode}' to 'onSetHardwareMode={setHardwareMode}'
-              <ConnectionPanel status={bridgeStatus} hardwareMode={hardwareMode} onSetHardwareMode={setHardwareMode} baudRate={baudRate} setBaudRate={setBaudRate} onConnect={handleConnect} onDisconnect={disconnectHardware} debugLog={debugLog} />
+              <ConnectionPanel 
+                status={bridgeStatus} 
+                hardwareMode={hardwareMode} 
+                onSetHardwareMode={setHardwareMode} 
+                baudRate={baudRate} 
+                setBaudRate={setBaudRate} 
+                onConnect={handleConnect} 
+                onDisconnect={disconnectHardware} 
+                debugLog={debugLog} 
+              />
             ) : dashboardTab === 'analysis' ? (
               <TraceAnalysisDashboard frames={frames} library={library} latestFrames={latestFrames} selectedSignalNames={analysisSelectedSignals} setSelectedSignalNames={setAnalysisSelectedSignals} watcherActive={watcherActive} setWatcherActive={setWatcherActive} lastAiAnalysis={lastAiAnalysis} aiLoading={aiLoading} onManualAnalyze={() => triggerAiAnalysis(false)} />
             ) : dashboardTab === 'live-visualizer' ? (

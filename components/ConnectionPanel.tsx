@@ -41,7 +41,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
     };
     if (isStackFull) return {
       title: "STACK_FAULT",
-      desc: "Android Bluetooth stack error. Toggle BT OFF/ON in system.",
+      desc: "Bluetooth system error detected. Try toggling Bluetooth OFF/ON.",
       icon: <AlertCircle className="text-red-500" size={24} />,
       color: "bg-red-50 border-red-100 text-red-700"
     };
@@ -75,13 +75,13 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
           <div className="grid grid-cols-2 gap-4 mb-6">
             <button 
               onClick={() => onSetHardwareMode('esp32-serial')} 
-              className={`flex flex-col items-center gap-3 p-5 rounded-2xl border transition-all ${hardwareMode === 'esp32-serial' ? 'bg-indigo-600 border-indigo-700 text-white shadow-lg scale-105' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
+              className={`flex flex-col items-center gap-3 p-5 rounded-2xl border transition-all ${hardwareMode === 'esp32-serial' ? 'bg-indigo-600 border-indigo-700 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
             >
               <Cable size={24}/><span className="text-[10px] font-orbitron font-black uppercase">Wired_Link</span>
             </button>
             <button 
               onClick={() => onSetHardwareMode('esp32-bt')} 
-              className={`flex flex-col items-center gap-3 p-5 rounded-2xl border transition-all ${hardwareMode === 'esp32-bt' ? 'bg-indigo-600 border-indigo-700 text-white shadow-lg scale-105' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
+              className={`flex flex-col items-center gap-3 p-5 rounded-2xl border transition-all ${hardwareMode === 'esp32-bt' ? 'bg-indigo-600 border-indigo-700 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400'}`}
             >
               <Bluetooth size={24}/><span className="text-[10px] font-orbitron font-black uppercase">BLE_Wireless</span>
             </button>
