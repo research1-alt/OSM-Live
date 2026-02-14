@@ -70,14 +70,37 @@ const App: React.FC = () => {
   }, []);
 
   /**
-   * UNIVERSAL FILE EXPORTER
+   * UNIVERSAL FILE EXPORTER - SUPPORTS NATIVE ANDROID AND DESKTOP PICKERS
    */
-  const exportFile = (data: string, fileName: string) => {
+  const exportFile = async (data: string, fileName: string, mimeType: string = 'text/plain') => {
     const android = (window as any).AndroidInterface;
-    if (android && android.saveFile) {
+    
+    if (android && android.saveFileWithPicker) {
+      // Use the new Android SAF Picker
+      android.saveFileWithPicker(data, fileName, mimeType);
+    } else if (android && android.saveFile) {
+      // Legacy Android Save
       android.saveFile(data, fileName);
+    } else if ('showSaveFilePicker' in window) {
+      // Modern Web Browser "Save As"
+      try {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: fileName,
+          types: [{
+            description: mimeType === 'text/plain' ? 'CAN Trace File' : 'Telemetry CSV',
+            accept: { [mimeType]: [fileName.endsWith('.trc') ? '.trc' : '.csv'] },
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(data);
+        await writable.close();
+        addDebugLog("SYS: File saved successfully.");
+      } catch (e: any) {
+        if (e.name !== 'AbortError') addDebugLog("ERROR: Web save failed.");
+      }
     } else {
-      const blob = new Blob([data], { type: 'text/plain' });
+      // Standard Forced Download Fallback
+      const blob = new Blob([data], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -107,8 +130,8 @@ const App: React.FC = () => {
       
       content += rows.join('\n');
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      exportFile(content, `OSM_TRACE_${stamp}.trc`);
-      addDebugLog("SYS: Raw trace exported.");
+      await exportFile(content, `OSM_TRACE_${stamp}.trc`, 'text/plain');
+      addDebugLog("SYS: Raw trace export initiated.");
     } catch (e) {
       addDebugLog("ERROR: Trace export failed.");
     } finally {
@@ -120,7 +143,6 @@ const App: React.FC = () => {
     if (frames.length === 0) return;
     setIsSavingDecoded(true);
     try {
-      // 1. Find which IDs from the library were actually seen in the current live session
       const activeNormalizedIds = new Set(Object.keys(latestFrames));
       const activeSignals: { name: string; msgId: string; sig: DBCSignal }[] = [];
       const msgIdToSignals: Record<string, string[]> = {};
@@ -142,15 +164,11 @@ const App: React.FC = () => {
         return;
       }
 
-      // 2. Create Header: timestamp, Signal1, Signal2...
       const header = ["timestamp", ...activeSignals.map(s => s.name)].join(",");
       const csvRows: string[] = [header];
-
-      // 3. Process frames and track Last Known Values (LKV)
       const lkv: Record<string, string> = {};
       activeSignals.forEach(s => lkv[s.name] = "0");
 
-      // Optimization: Process up to 100k frames for file generation stability
       const processBuffer = frames.length > 100000 ? frames.slice(-100000) : frames;
 
       processBuffer.forEach(frame => {
@@ -163,10 +181,8 @@ const App: React.FC = () => {
             signalNamesInMsg.forEach(sName => {
               const sig = dbEntry.signals[sName];
               const val = decodeSignal(frame.data, sig);
-              lkv[sName] = val.split(' ')[0]; // Extract numeric value without unit
+              lkv[sName] = val.split(' ')[0];
             });
-
-            // Write a row representing state at this frame's timestamp
             const row = [(frame.timestamp / 1000).toFixed(3), ...activeSignals.map(s => lkv[s.name])].join(",");
             csvRows.push(row);
           }
@@ -175,8 +191,8 @@ const App: React.FC = () => {
 
       const content = csvRows.join("\n");
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      exportFile(content, `OSM_DECODED_${stamp}.csv`);
-      addDebugLog("SYS: Decoded telemetry (Wide Format) exported.");
+      await exportFile(content, `OSM_DECODED_${stamp}.csv`, 'text/csv');
+      addDebugLog("SYS: Wide-format export initiated.");
     } catch (e) {
       addDebugLog("ERROR: Decoded export failed.");
       console.error(e);
