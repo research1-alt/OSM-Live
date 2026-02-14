@@ -31,7 +31,7 @@ const App: React.FC = () => {
   const [view, setView] = useState<'home' | 'live'>('home');
   const [previewMode, setPreviewMode] = useState('full' as PreviewMode);
   const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis' | 'live-visualizer'>('link');
-  const [hardwareMode, setHardwareMode] = useState<'pcan' | 'esp32-serial' | 'esp32-bt'>('pcan');
+  const [hardwareMode, setHardwareMode] = useState<'esp32-serial' | 'esp32-bt'>('esp32-bt');
   const [frames, setFrames] = useState<CANFrame[]>([]);
   const [latestFrames, setLatestFrames] = useState<Record<string, CANFrame>>({});
   const [isPaused, setIsPaused] = useState(false);
