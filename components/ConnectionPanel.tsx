@@ -8,8 +8,6 @@ interface ConnectionPanelProps {
   hwStatus?: HardwareStatus;
   hardwareMode: 'esp32-serial' | 'esp32-bt';
   onSetHardwareMode: (mode: 'esp32-serial' | 'esp32-bt') => void;
-  baudRate: number;
-  setBaudRate: (rate: number) => void;
   onConnect: () => void;
   onDisconnect: () => void;
   debugLog?: string[];
@@ -19,8 +17,6 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   status, 
   hardwareMode,
   onSetHardwareMode,
-  baudRate,
-  setBaudRate,
   onConnect, 
   onDisconnect, 
   debugLog = []
@@ -104,29 +100,6 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
               </button>
             </div>
 
-            {hardwareMode === 'esp32-serial' && (
-              <div className="mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Sliders size={16} className="text-indigo-600" />
-                  <span className="text-[10px] font-orbitron font-black text-slate-600 uppercase">Baud_Rate</span>
-                </div>
-                <select 
-                  value={baudRate} 
-                  onChange={(e) => setBaudRate(Number(e.target.value))}
-                  className="bg-white border border-slate-300 rounded-lg px-3 py-1 text-[10px] font-mono font-bold text-indigo-600 outline-none"
-                >
-                  <option value={9600}>9600</option>
-                  <option value={19200}>19200</option>
-                  <option value={38400}>38400</option>
-                  <option value={57600}>57600</option>
-                  <option value={115200}>115200</option>
-                  <option value={230400}>230400</option>
-                  <option value={460800}>460800</option>
-                  <option value={921600}>921600</option>
-                </select>
-              </div>
-            )}
-
             <div className={`mb-6 p-5 md:p-6 rounded-[32px] border transition-all duration-500 shadow-inner ${currentStatus.color}`}>
                <div className="flex items-center gap-4 mb-3">
                   <div className="p-2 bg-white rounded-2xl shadow-sm">
@@ -155,7 +128,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                   <div className="flex gap-3">
                     <div className="text-[9px] font-orbitron font-black text-indigo-600 bg-white w-5 h-5 flex items-center justify-center rounded-lg shadow-sm shrink-0">1</div>
                     <p className="text-[10px] text-slate-600 font-medium leading-snug">
-                      <b>Desktop/Laptop Users:</b> Use the <b>Wired (USB)</b> mode for 100% reliability. Ensure you have high-quality USB data cables.
+                      <b>Desktop/Laptop Users:</b> Use the <b>Wired (USB)</b> mode for 100% reliability. The default baud rate is locked to 115200.
                     </p>
                   </div>
                   <div className="flex gap-3">

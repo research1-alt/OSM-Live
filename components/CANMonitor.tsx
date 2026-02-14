@@ -24,6 +24,7 @@ const CANMonitor: React.FC<CANMonitorProps> = ({
   const [timeMode, setTimeMode] = useState<'relative' | 'absolute'>('relative');
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // HUD optimization: only show most recent 1000 frames for browser performance
   const displayFrames = useMemo(() => {
     if (frames.length <= 1000) return frames;
     return frames.slice(-1000);
@@ -78,7 +79,7 @@ const CANMonitor: React.FC<CANMonitorProps> = ({
       <div className="bg-slate-50 px-6 py-2.5 flex justify-between items-center border-b border-slate-200 shrink-0 z-[100]">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 px-3 py-1 bg-white rounded border border-slate-200 text-[9px] font-orbitron font-black text-indigo-600 shadow-sm">
-            <Terminal size={10} /> TRACE_VIEW_HUD
+            <Terminal size={10} /> LIVE_TRACE_HUD
           </div>
           
           <button 
@@ -110,7 +111,7 @@ const CANMonitor: React.FC<CANMonitorProps> = ({
           </button>
         </div>
         <div className="text-[8px] font-orbitron font-black text-slate-300 uppercase tracking-[0.3em] hidden md:flex items-center gap-2">
-          <Info size={10} className="text-indigo-400" /> RECENT_STREAM_WINDOW
+          <Info size={10} className="text-indigo-400" /> RECENT_WINDOW: {displayFrames.length.toLocaleString()}
         </div>
       </div>
 
@@ -135,7 +136,7 @@ const CANMonitor: React.FC<CANMonitorProps> = ({
       <div className="bg-slate-50 px-6 py-2 border-t border-slate-200 flex justify-between items-center text-[8px] font-orbitron font-black text-slate-400 uppercase tracking-widest shrink-0 z-[60]">
         <div className="flex gap-6">
           <span>PCAN_VIEW_COMPATIBLE: 100%</span>
-          <span className="text-indigo-600 font-bold">BUFFER_USAGE: {frames.length.toLocaleString()} FRAMES</span>
+          <span className="text-indigo-600 font-bold">BUFFER_USAGE: {frames.length.toLocaleString()} / 1,000,000 FRAMES</span>
           {isSaving && (
             <div className="flex items-center gap-2 text-indigo-600 font-bold ml-4">
                <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-pulse"></div>
