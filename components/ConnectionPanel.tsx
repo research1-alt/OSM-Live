@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Zap, Cpu, Loader2, Bluetooth, Cable, Globe, AlertCircle, Settings, Info, ShieldCheck, Wifi, WifiOff, Search, Monitor, Smartphone, HelpCircle, RefreshCcw } from 'lucide-react';
+import { Zap, Cpu, Loader2, Bluetooth, Cable, Globe, AlertCircle, Settings, Info, ShieldCheck, Wifi, WifiOff, Search, Monitor, Smartphone, HelpCircle, RefreshCcw, Sliders } from 'lucide-react';
 import { ConnectionStatus, HardwareStatus } from '../types.ts';
 
 interface ConnectionPanelProps {
@@ -19,12 +19,15 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   status, 
   hardwareMode,
   onSetHardwareMode,
+  baudRate,
+  setBaudRate,
   onConnect, 
   onDisconnect, 
   debugLog = []
 }) => {
   const [isNative, setIsNative] = useState(false);
   const [showTroubleshooting, setShowTroubleshooting] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const isDesktop = useMemo(() => !isNative && /Windows|Macintosh|Linux/.test(navigator.userAgent), [isNative]);
 
   useEffect(() => {
@@ -36,17 +39,17 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
   const getStatusDetail = () => {
     if (status === 'connected') return {
       title: "LINK_ESTABLISHED",
-      desc: "Tactical bridge active. Telemetry stream is live and secured.",
+      desc: `Tactical bridge active via ${hardwareMode === 'esp32-bt' ? 'Bluetooth' : 'Serial'}. Telemetry stream is live.`,
       icon: <Wifi className="text-emerald-500" size={24} />,
       color: "bg-emerald-50 border-emerald-100 text-emerald-700"
     };
     if (status === 'connecting') return {
       title: "HANDSHAKING...",
-      desc: "Negotiating GATT protocol with hardware. Check the popup list.",
+      desc: "Negotiating protocol with hardware. Check the popup/port selector.",
       icon: <Loader2 className="text-indigo-500 animate-spin" size={24} />,
       color: "bg-indigo-50 border-indigo-100 text-indigo-700"
     };
-    if (hasGattError && isDesktop) return {
+    if (hasGattError && isDesktop && hardwareMode === 'esp32-bt') return {
       title: "DESKTOP_GATT_LOCK",
       desc: "Device is locked by the OS. Unpair it from System Settings.",
       icon: <Monitor className="text-red-500" size={24} />,
@@ -54,7 +57,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
     };
     if (status === 'error') return {
       title: "BRIDGE_ERROR",
-      desc: "Protocol fault. Reset ESP32 power and try again.",
+      desc: "Protocol fault. Reset hardware power and try again.",
       icon: <AlertCircle className="text-red-500" size={24} />,
       color: "bg-red-50 border-red-100 text-red-700"
     };
@@ -89,10 +92,9 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
             <div className="grid grid-cols-2 gap-3 md:gap-4 mb-6 md:mb-8">
               <button 
                 onClick={() => onSetHardwareMode('esp32-serial')} 
-                disabled={true}
-                className="flex flex-col items-center gap-3 p-4 md:p-5 rounded-[24px] border transition-all opacity-30 cursor-not-allowed bg-slate-50 border-slate-100 text-slate-400"
+                className={`flex flex-col items-center gap-3 p-4 md:p-5 rounded-[24px] border transition-all ${hardwareMode === 'esp32-serial' ? 'bg-indigo-600 border-indigo-700 text-white shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'}`}
               >
-                <Cable size={20}/><span className="text-[8px] font-orbitron font-black uppercase">Wired (Soon)</span>
+                <Cable size={20}/><span className="text-[8px] font-orbitron font-black uppercase">Wired (USB)</span>
               </button>
               <button 
                 onClick={() => onSetHardwareMode('esp32-bt')} 
@@ -101,6 +103,29 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                 <Bluetooth size={20}/><span className="text-[8px] font-orbitron font-black uppercase">Bluetooth</span>
               </button>
             </div>
+
+            {hardwareMode === 'esp32-serial' && (
+              <div className="mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Sliders size={16} className="text-indigo-600" />
+                  <span className="text-[10px] font-orbitron font-black text-slate-600 uppercase">Baud_Rate</span>
+                </div>
+                <select 
+                  value={baudRate} 
+                  onChange={(e) => setBaudRate(Number(e.target.value))}
+                  className="bg-white border border-slate-300 rounded-lg px-3 py-1 text-[10px] font-mono font-bold text-indigo-600 outline-none"
+                >
+                  <option value={9600}>9600</option>
+                  <option value={19200}>19200</option>
+                  <option value={38400}>38400</option>
+                  <option value={57600}>57600</option>
+                  <option value={115200}>115200</option>
+                  <option value={230400}>230400</option>
+                  <option value={460800}>460800</option>
+                  <option value={921600}>921600</option>
+                </select>
+              </div>
+            )}
 
             <div className={`mb-6 p-5 md:p-6 rounded-[32px] border transition-all duration-500 shadow-inner ${currentStatus.color}`}>
                <div className="flex items-center gap-4 mb-3">
@@ -122,7 +147,7 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                 onClick={() => setShowTroubleshooting(!showTroubleshooting)}
                 className="flex items-center gap-2 text-[9px] font-orbitron font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-700 transition-colors"
               >
-                <HelpCircle size={14} /> {showTroubleshooting ? 'HIDE_GUIDE' : 'DEVICE_NOT_VISIBLE?'}
+                <HelpCircle size={14} /> {showTroubleshooting ? 'HIDE_GUIDE' : 'CONNECTION_ISSUES?'}
               </button>
               
               {showTroubleshooting && (
@@ -130,19 +155,19 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                   <div className="flex gap-3">
                     <div className="text-[9px] font-orbitron font-black text-indigo-600 bg-white w-5 h-5 flex items-center justify-center rounded-lg shadow-sm shrink-0">1</div>
                     <p className="text-[10px] text-slate-600 font-medium leading-snug">
-                      <b>Check Settings:</b> Go to your laptop's Bluetooth settings. If you see your device paired there, <b>Remove</b> or <b>Unpair</b> it. The browser needs it to be "free".
+                      <b>Desktop/Laptop Users:</b> Use the <b>Wired (USB)</b> mode for 100% reliability. Ensure you have high-quality USB data cables.
                     </p>
                   </div>
                   <div className="flex gap-3">
                     <div className="text-[9px] font-orbitron font-black text-indigo-600 bg-white w-5 h-5 flex items-center justify-center rounded-lg shadow-sm shrink-0">2</div>
                     <p className="text-[10px] text-slate-600 font-medium leading-snug">
-                      <b>Hard Reset:</b> Unplug the ESP32 from its power source and plug it back in. Wait 5 seconds for it to start advertising.
+                      <b>Bluetooth Troubleshooting:</b> If device is invisible, go to System Settings and <b>Unpair/Forget</b> it. Then restart the ESP32.
                     </p>
                   </div>
                   <div className="flex gap-3">
                     <div className="text-[9px] font-orbitron font-black text-indigo-600 bg-white w-5 h-5 flex items-center justify-center rounded-lg shadow-sm shrink-0">3</div>
                     <p className="text-[10px] text-slate-600 font-medium leading-snug">
-                      <b>Close Tabs:</b> Ensure no other browser tabs or mobile apps are currently connected to the device.
+                      <b>Hard Reset:</b> Unplug and replug the hardware. Wait 5 seconds for the boot sequence to complete.
                     </p>
                   </div>
                   <button 

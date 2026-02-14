@@ -103,6 +103,70 @@ const App: React.FC = () => {
   }, [isPaused]);
 
   /**
+   * WEB SERIAL HANDLER - FOR WIRED USB CONNECTIONS
+   */
+  const connectSerial = async () => {
+    if (!("serial" in navigator)) {
+      addDebugLog("ERROR: Web Serial API not supported. Use Chrome or Edge.");
+      setBridgeStatus('error');
+      return;
+    }
+
+    try {
+      setBridgeStatus('connecting');
+      addDebugLog("SERIAL: Opening Port Selector...");
+      
+      const port = await (navigator as any).serial.requestPort();
+      await port.open({ baudRate });
+      serialPortRef.current = port;
+      
+      setFrames([]);
+      setLatestFrames({});
+      frameMapRef.current.clear();
+      
+      setBridgeStatus('connected');
+      setHwStatus('active');
+      addDebugLog(`BRIDGE: Wired Link Active at ${baudRate} bps.`);
+
+      keepReadingRef.current = true;
+      const decoder = new TextDecoder();
+      let buffer = "";
+      
+      const reader = port.readable.getReader();
+      serialReaderRef.current = reader;
+
+      try {
+        while (keepReadingRef.current) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          if (buffer.includes('\n')) {
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+              const cleanLine = line.trim();
+              if (!cleanLine || !cleanLine.includes('#')) continue;
+              const parts = cleanLine.split('#');
+              if (parts.length >= 3) {
+                handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
+              }
+            }
+          }
+        }
+      } catch (e: any) {
+        if (keepReadingRef.current) addDebugLog(`SERIAL_READ_ERROR: ${e.message}`);
+      } finally {
+        reader.releaseLock();
+        serialReaderRef.current = null;
+      }
+    } catch (err: any) { 
+      setBridgeStatus('disconnected'); 
+      addDebugLog(`SERIAL_FAULT: ${err.message}`);
+    }
+  };
+
+  /**
    * WEB BLUETOOTH HANDLER - DESKTOP RELIABILITY FIX
    */
   const connectWebBluetooth = async () => {
@@ -113,7 +177,6 @@ const App: React.FC = () => {
     }
 
     try {
-      // 1. Force cleanup of previous session
       if (webBluetoothDeviceRef.current && webBluetoothDeviceRef.current.gatt.connected) {
         addDebugLog("SCAN: Closing existing link...");
         await webBluetoothDeviceRef.current.gatt.disconnect();
@@ -123,7 +186,6 @@ const App: React.FC = () => {
       addDebugLog("SCAN: Opening OS Bluetooth Picker...");
       
       const device = await (navigator as any).bluetooth.requestDevice({
-        // Combined filters to increase visibility across different OS stacks
         filters: [
           { services: [UART_SERVICE_UUID] },
           { namePrefix: "OSM" },
@@ -141,7 +203,6 @@ const App: React.FC = () => {
         setHwStatus('offline');
       });
 
-      // 2. GATT Handshake with stabilization
       const server = await device.gatt.connect();
       addDebugLog("LINK: GATT connected. Cooling (1000ms)...");
       await new Promise(r => setTimeout(r, 1000));
@@ -243,6 +304,15 @@ const App: React.FC = () => {
     keepReadingRef.current = false;
     addDebugLog("SYS: Closing all links...");
 
+    if (serialReaderRef.current) {
+      try { await serialReaderRef.current.cancel(); } catch (e) {}
+    }
+
+    if (serialPortRef.current) {
+      try { await serialPortRef.current.close(); } catch (e) {}
+      serialPortRef.current = null;
+    }
+
     if (webBluetoothDeviceRef.current?.gatt.connected) {
       await webBluetoothDeviceRef.current.gatt.disconnect();
     }
@@ -265,7 +335,7 @@ const App: React.FC = () => {
         connectWebBluetooth();
       }
     } else {
-      addDebugLog("ERROR: Serial mode not configured in this build.");
+      connectSerial();
     }
   };
 
