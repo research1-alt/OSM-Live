@@ -19,9 +19,7 @@ const BATCH_UPDATE_INTERVAL = 60;
 const STALE_SIGNAL_TIMEOUT = 5000; 
 const CRITICAL_FAULT_IDS = ["2419654480", "2553303104", "2460002948"];
 
-// Nordic UART Service UUIDs used by ESP32 Firmware
-const UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-const TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+type PreviewMode = 'full' | 'mobile' | 'tablet';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
@@ -31,8 +29,9 @@ const App: React.FC = () => {
   
   const [sessionId, setSessionId] = useState<string | null>(() => localStorage.getItem('osm_sid'));
   const [view, setView] = useState<'home' | 'live'>('home');
+  const [previewMode, setPreviewMode] = useState('full' as PreviewMode);
   const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis' | 'live-visualizer'>('link');
-  const [hardwareMode, setHardwareMode] = useState<'esp32-serial' | 'esp32-bt'>('esp32-bt');
+  const [hardwareMode, setHardwareMode] = useState<'pcan' | 'esp32-serial' | 'esp32-bt'>('pcan');
   const [frames, setFrames] = useState<CANFrame[]>([]);
   const [latestFrames, setLatestFrames] = useState<Record<string, CANFrame>>({});
   const [isPaused, setIsPaused] = useState(false);
@@ -43,6 +42,7 @@ const App: React.FC = () => {
   const [baudRate, setBaudRate] = useState(115200);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   
+  // Simulation is strictly OFF to avoid "farzi" (fake) messages
   const [simulationEnabled, setSimulationEnabled] = useState(false);
 
   // LIFTED PERSISTENT STATES
@@ -64,7 +64,6 @@ const App: React.FC = () => {
   const bleBufferRef = useRef<string>("");
   const serialPortRef = useRef<any>(null);
   const serialReaderRef = useRef<any>(null);
-  const webBluetoothDeviceRef = useRef<any>(null);
   const keepReadingRef = useRef(false);
   const lastAnalyzedFaultTime = useRef<number>(0);
   const isAutoSavingRef = useRef(false);
@@ -74,12 +73,30 @@ const App: React.FC = () => {
     setDebugLog(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
   }, []);
 
+  // AUTO-WATCHER ON CONNECTION
   useEffect(() => {
     if (bridgeStatus === 'connected') {
       setWatcherActive(true);
       addDebugLog("AUTO_WATCHER: Hardware link established. Autonomous monitoring activated.");
     }
   }, [bridgeStatus, addDebugLog]);
+
+  // BACKGROUND WATCHER LOGIC
+  useEffect(() => {
+    if (!watcherActive || aiLoading || frames.length === 0) return;
+
+    const hasFault = (Object.values(latestFrames) as CANFrame[]).some(f => {
+      const normId = f.id.replace('0x', '').toUpperCase();
+      if (CRITICAL_FAULT_IDS.some(fid => fid.includes(normId))) {
+        return f.data.some(d => parseInt(d, 16) > 0);
+      }
+      return false;
+    });
+
+    if (hasFault && Date.now() - lastAnalyzedFaultTime.current > 30000) { 
+       triggerAiAnalysis(true);
+    }
+  }, [latestFrames, watcherActive, aiLoading]);
 
   const triggerAiAnalysis = async (isAuto = false) => {
     if (frames.length === 0) return;
@@ -115,68 +132,64 @@ const App: React.FC = () => {
     pendingFramesRef.current.push(newFrame);
   }, [isPaused]);
 
-  // WEB BLUETOOTH HANDLER FOR LAPTOPS
-  const connectWebBluetooth = async () => {
-    if (!(navigator as any).bluetooth) {
-      addDebugLog("ERROR: Web Bluetooth not supported on this browser. Use Chrome/Edge or Mobile HUD App.");
-      setBridgeStatus('error');
-      return;
-    }
-    try {
-      setBridgeStatus('connecting');
-      addDebugLog("SCANNING: Requesting permission for BLE Hardware...");
-      const device = await (navigator as any).bluetooth.requestDevice({
-        filters: [{ namePrefix: 'OSM' }, { namePrefix: 'ESP32' }, { namePrefix: 'CAN' }],
-        optionalServices: [UART_SERVICE_UUID]
-      });
-
-      webBluetoothDeviceRef.current = device;
-      addDebugLog(`LINK: Connecting to ${device.name}...`);
-      
-      const server = await device.gatt.connect();
-      const service = await server.getService(UART_SERVICE_UUID);
-      const characteristic = await service.getCharacteristic(TX_CHAR_UUID);
-
-      await characteristic.startNotifications();
-      
-      device.addEventListener('gattserverdisconnected', () => {
-        addDebugLog("LINK: Device disconnected.");
-        setBridgeStatus('disconnected');
-        setHwStatus('offline');
-      });
-
-      characteristic.addEventListener('characteristicvaluechanged', (event: any) => {
-        const value = event.target.value;
-        const decoder = new TextDecoder();
-        const chunk = decoder.decode(value);
-        
-        bleBufferRef.current += chunk;
-        if (bleBufferRef.current.includes('\n')) {
-          const lines = bleBufferRef.current.split('\n');
-          bleBufferRef.current = lines.pop() || "";
-          for (const line of lines) {
-            const cleanLine = line.trim();
-            if (!cleanLine) continue;
-            const parts = cleanLine.split('#');
-            if (parts.length >= 3) handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      const now = performance.now();
+      setLatestFrames(prev => {
+        const next = { ...prev };
+        let changed = false;
+        Object.keys(next).forEach(id => {
+          if (now - next[id].timestamp > STALE_SIGNAL_TIMEOUT) {
+            delete next[id];
+            changed = true;
           }
-        }
+        });
+        return changed ? next : prev;
       });
+    }, 1000);
+    return () => clearInterval(cleanupInterval);
+  }, []);
 
-      setSimulationEnabled(false);
-      setFrames([]);
-      setLatestFrames({});
-      frameMapRef.current.clear();
-      
-      setBridgeStatus('connected');
-      setHwStatus('active');
-      addDebugLog("BRIDGE: Web Bluetooth Live.");
+  useEffect(() => {
+    (window as any).onNativeBleLog = (msg: string) => addDebugLog(msg);
+    (window as any).onNativeBleStatus = (status: string) => {
+      setBridgeStatus(status as ConnectionStatus);
+      if (status === 'connected') {
+          setHwStatus('active');
+          setSimulationEnabled(false);
+          setFrames([]);
+          setLatestFrames({});
+          frameMapRef.current.clear();
+      }
+      else if (status === 'error') setHwStatus('fault');
+      else setHwStatus('offline');
+    };
+    (window as any).onNativeBleData = (chunk: string) => {
+      bleBufferRef.current += chunk;
+      if (bleBufferRef.current.includes('\n')) {
+        const lines = bleBufferRef.current.split('\n');
+        bleBufferRef.current = lines.pop() || "";
+        for (const line of lines) {
+          const parts = line.trim().split('#');
+          if (parts.length >= 3) handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
+        }
+      }
+    };
+    return () => {
+      delete (window as any).onNativeBleLog;
+      delete (window as any).onNativeBleStatus;
+      delete (window as any).onNativeBleData;
+    };
+  }, [addDebugLog, handleNewFrame]);
 
-    } catch (err: any) {
-      addDebugLog(`BLE_FAULT: ${err.message}`);
-      setBridgeStatus('disconnected');
-    }
-  };
+  useEffect(() => {
+    if (!simulationEnabled || bridgeStatus === 'connected' || bridgeStatus === 'connecting') return;
+    const interval = setInterval(() => {
+        const mock = generateMockPacket(frameMapRef.current, performance.now());
+        handleNewFrame(mock.id.replace('0x',''), mock.dlc, mock.data);
+    }, 500);
+    return () => clearInterval(interval);
+  }, [simulationEnabled, bridgeStatus, handleNewFrame]);
 
   const connectSerial = async () => {
     if (!("serial" in navigator)) {
@@ -233,21 +246,27 @@ const App: React.FC = () => {
 
   const disconnectHardware = useCallback(async () => {
     keepReadingRef.current = false;
-    addDebugLog("SYS: Closing hardware links...");
+    addDebugLog("SYS: Initiating hardware shutdown...");
 
     if (serialReaderRef.current) {
-      try { await serialReaderRef.current.cancel(); } catch (e) {}
+      try {
+        await serialReaderRef.current.cancel(); 
+      } catch (e) {}
     }
+
     if (serialPortRef.current) {
-      try { await serialPortRef.current.close(); } catch (e) {}
+      try { 
+        await serialPortRef.current.close(); 
+        addDebugLog("SYS: Serial Port closed.");
+      } catch (e) {}
       serialPortRef.current = null;
     }
-    if (webBluetoothDeviceRef.current?.gatt.connected) {
-      try { webBluetoothDeviceRef.current.gatt.disconnect(); } catch (e) {}
-      webBluetoothDeviceRef.current = null;
-    }
+
     if ((window as any).NativeBleBridge) {
-      try { (window as any).NativeBleBridge.disconnectBle(); } catch (e) {}
+      try {
+        (window as any).NativeBleBridge.disconnectBle();
+        addDebugLog("SYS: BLE Link terminated.");
+      } catch (e) {}
     }
 
     bleBufferRef.current = "";
@@ -256,7 +275,7 @@ const App: React.FC = () => {
     setFrames([]);
     setLatestFrames({});
     frameMapRef.current.clear();
-    addDebugLog("SYS: Hardware offline.");
+    addDebugLog("SYS: Hardware resources fully released.");
   }, [addDebugLog]);
 
   const handleConnect = () => {
@@ -266,12 +285,8 @@ const App: React.FC = () => {
     setLatestFrames({});
     
     if (hardwareMode === 'esp32-bt') {
-        if ((window as any).NativeBleBridge) {
-          setBridgeStatus('connecting');
-          (window as any).NativeBleBridge.startBleLink();
-        } else {
-          connectWebBluetooth();
-        }
+        setBridgeStatus('connecting');
+        (window as any).NativeBleBridge?.startBleLink();
     } else {
         connectSerial();
     }
@@ -316,7 +331,9 @@ const App: React.FC = () => {
       const fileName = `${prefix}${timestampStr}.csv`;
       
       const seenIds = new Set<string>();
-      frames.forEach(f => seenIds.add(normalizeId(f.id.replace('0x', ''), true)));
+      frames.forEach(f => {
+        seenIds.add(normalizeId(f.id.replace('0x', ''), true));
+      });
 
       const activeSignalsMap = new Map<string, DBCSignal>();
       const allActiveSignalNames: string[] = [];
@@ -334,27 +351,34 @@ const App: React.FC = () => {
       });
       
       if (allActiveSignalNames.length === 0) {
+        addDebugLog("EXPORT_ERROR: No decoded signals found for captured messages.");
         if (!isAuto) setIsSavingDecoded(false);
         return;
       }
 
       allActiveSignalNames.sort(); 
+
       let csv = "timestamp," + allActiveSignalNames.join(",") + "\n";
       const lastKnownValues: Record<string, string> = {};
       allActiveSignalNames.forEach(name => lastKnownValues[name] = "0");
 
       frames.forEach(f => {
         const normFrameId = normalizeId(f.id.replace('0x', ''), true);
-        const dbe = (Object.entries(library.database) as [string, DBCMessage][]).find(([id]) => normalizeId(id, false) === normFrameId);
+        const dbe = (Object.entries(library.database) as [string, DBCMessage][]).find(
+          ([id]) => normalizeId(id, false) === normFrameId
+        );
+
         if (dbe) {
           const [_, msg] = dbe;
           Object.values(msg.signals).forEach(sig => {
             if (activeSignalsMap.has(sig.name)) {
                const valStr = decodeSignal(f.data, sig);
-               lastKnownValues[sig.name] = valStr.replace(/[a-zA-Z%]/g, '').trim() || "0";
+               const cleanVal = valStr.replace(/[a-zA-Z%]/g, '').trim() || "0";
+               lastKnownValues[sig.name] = cleanVal;
             }
           });
-          csv += `${(f.timestamp / 1000).toFixed(6)},${allActiveSignalNames.map(name => lastKnownValues[name]).join(",")}\n`;
+          const rowValues = allActiveSignalNames.map(name => lastKnownValues[name]);
+          csv += `${(f.timestamp / 1000).toFixed(6)},${rowValues.join(",")}\n`;
         }
       });
 
@@ -372,21 +396,32 @@ const App: React.FC = () => {
       addDebugLog(`${isAuto ? 'AUTO_SAVE' : 'SUCCESS'}: Decoded data exported.`);
     } catch (e: any) {
       addDebugLog("EXPORT_ERROR: " + e.message);
+      console.error(e);
     } finally {
       if (!isAuto) setIsSavingDecoded(false);
     }
   }, [frames, library, addDebugLog]);
 
+  // AUTONOMOUS BUFFER MONITORING FOR AUTO-SAVE
   useEffect(() => {
     if (frames.length >= MAX_FRAME_LIMIT && !isAutoSavingRef.current) {
         isAutoSavingRef.current = true;
-        addDebugLog(`AUTO_WATCHER: Buffer limit (1M) reached. Triggering backups...`);
+        addDebugLog(`AUTO_WATCHER: Buffer limit (1M) reached. Initiating autonomous backup...`);
+        
+        // Execute saves
         handleSaveTrace(true);
         handleSaveDecodedData(true);
+        
+        // Purge and reset
         setFrames([]);
         setLatestFrames({});
         frameMapRef.current.clear();
-        setTimeout(() => { isAutoSavingRef.current = false; }, 5000);
+        addDebugLog("SYS: Buffer purged post autonomous save. Continuing telemetry stream.");
+        
+        // Brief timeout to prevent rapid re-trigger
+        setTimeout(() => {
+          isAutoSavingRef.current = false;
+        }, 5000);
     }
   }, [frames.length, handleSaveTrace, handleSaveDecodedData, addDebugLog]);
 
@@ -395,7 +430,14 @@ const App: React.FC = () => {
       if (pendingFramesRef.current.length > 0) {
         const batch = [...pendingFramesRef.current];
         pendingFramesRef.current = [];
-        setFrames(prev => [...prev, ...batch]);
+        
+        setFrames(prev => {
+          if (prev.length + batch.length > MAX_FRAME_LIMIT) {
+             return [...prev, ...batch];
+          }
+          return [...prev, ...batch];
+        });
+
         const latest: Record<string, CANFrame> = {};
         batch.forEach(f => { latest[normalizeId(f.id.replace('0x',''), true)] = f; });
         setLatestFrames(prev => ({ ...prev, ...latest }));
@@ -422,9 +464,9 @@ const App: React.FC = () => {
 
   if (!user) return <AuthScreen onAuthenticated={handleAuthenticated} />;
 
-  return (
-    <div className="h-screen w-full font-inter">
-      {view === 'home' ? (
+  const renderContent = () => {
+    if (view === 'home') {
+      return (
         <div className="h-full w-full flex flex-col items-center justify-center bg-white px-6 relative overflow-hidden">
           <div className="bg-indigo-600 p-6 rounded-[32px] text-white shadow-2xl mb-12 animate-bounce"><Cpu size={64} /></div>
           <h1 className="text-4xl md:text-8xl font-orbitron font-black text-slate-900 uppercase text-center">OSM <span className="text-indigo-600">LIVE</span></h1>
@@ -434,60 +476,87 @@ const App: React.FC = () => {
             <button onClick={handleLogout} className="w-full py-4 text-slate-400 font-bold uppercase text-[10px] tracking-widest flex items-center justify-center gap-2">Terminate Session</button>
           </div>
         </div>
-      ) : (
-        <div className="h-full w-full flex flex-col bg-slate-50 safe-pt overflow-hidden relative">
-          <header className="h-14 md:h-16 border-b flex items-center justify-between px-4 md:px-6 bg-white shrink-0 z-[100]">
-            <div className="flex items-center gap-3 md:gap-4">
-              <button onClick={() => setView('home')} className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={18} /></button>
-              <h2 className="text-[10px] md:text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
-            </div>
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-300'}`} />
-            </div>
-          </header>
+      );
+    }
 
-          <main className="flex-1 overflow-hidden relative flex flex-col min-h-0">
-            {dashboardTab === 'link' ? (
-              <ConnectionPanel 
-                status={bridgeStatus} 
-                hardwareMode={hardwareMode} 
-                onSetHardwareMode={setHardwareMode} 
-                baudRate={baudRate} 
-                setBaudRate={setBaudRate} 
-                onConnect={handleConnect} 
-                onDisconnect={disconnectHardware} 
-                debugLog={debugLog} 
-              />
-            ) : dashboardTab === 'analysis' ? (
-              <TraceAnalysisDashboard frames={frames} library={library} latestFrames={latestFrames} selectedSignalNames={analysisSelectedSignals} setSelectedSignalNames={setAnalysisSelectedSignals} watcherActive={watcherActive} setWatcherActive={setWatcherActive} lastAiAnalysis={lastAiAnalysis} aiLoading={aiLoading} onManualAnalyze={() => triggerAiAnalysis(false)} />
-            ) : dashboardTab === 'live-visualizer' ? (
-              <LiveVisualizerDashboard frames={frames} library={library} latestFrames={latestFrames} selectedSignalNames={visualizerSelectedSignals} setSelectedSignalNames={setVisualizerSelectedSignals} />
-            ) : dashboardTab === 'trace' ? (
-              <div className="flex-1 flex flex-col overflow-hidden p-2 md:p-4 gap-4">
-                 <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} onSaveTrace={() => handleSaveTrace(false)} isSaving={isSaving} />
-              </div>
-            ) : (
-              <LibraryPanel library={library} onUpdateLibrary={setLibrary} latestFrames={latestFrames} onSaveDecoded={() => handleSaveDecodedData(false)} isSavingDecoded={isSavingDecoded} />
-            )}
-          </main>
+    return (
+      <div className="h-full w-full flex flex-col bg-slate-50 safe-pt overflow-hidden relative">
+        <header className="h-14 md:h-16 border-b flex items-center justify-between px-4 md:px-6 bg-white shrink-0 z-[100]">
+          <div className="flex items-center gap-3 md:gap-4">
+            <button onClick={() => setView('home')} className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={18} /></button>
+            <h2 className="text-[10px] md:text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
+          </div>
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-300'}`} />
+          </div>
+        </header>
 
-          <nav className="h-16 md:h-20 bg-white border-t flex items-center justify-around px-2 md:px-4 pb-1 md:pb-2 shrink-0 safe-pb z-[100]">
-            {[
-                { id: 'link', icon: Bluetooth, label: 'LINK' },
-                { id: 'trace', icon: LayoutDashboard, label: 'HUD' },
-                { id: 'library', icon: Database, label: 'DATA' },
-                { id: 'live-visualizer', icon: ChartIcon, label: 'LIVE' },
-                { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
-            ].map(tab => (
-                <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}>
-                    <tab.icon size={18} /><span className="text-[7px] md:text-[8px] font-orbitron font-black uppercase tracking-tighter md:tracking-normal">{tab.label}</span>
-                </button>
-            ))}
-          </nav>
-        </div>
-      )}
-    </div>
-  );
+        <main className="flex-1 overflow-hidden relative flex flex-col min-h-0">
+          {dashboardTab === 'link' ? (
+            <ConnectionPanel 
+              status={bridgeStatus} 
+              hardwareMode={hardwareMode} 
+              onSetHardwareMode={setHardwareMode} 
+              baudRate={baudRate} 
+              setBaudRate={setBaudRate} 
+              onConnect={handleConnect} 
+              onDisconnect={disconnectHardware} 
+              debugLog={debugLog}
+            />
+          ) : dashboardTab === 'analysis' ? (
+            <TraceAnalysisDashboard 
+              frames={frames} 
+              library={library} 
+              latestFrames={latestFrames} 
+              selectedSignalNames={analysisSelectedSignals}
+              setSelectedSignalNames={setAnalysisSelectedSignals}
+              watcherActive={watcherActive}
+              setWatcherActive={setWatcherActive}
+              lastAiAnalysis={lastAiAnalysis}
+              aiLoading={aiLoading}
+              onManualAnalyze={() => triggerAiAnalysis(false)}
+            />
+          ) : dashboardTab === 'live-visualizer' ? (
+            <LiveVisualizerDashboard 
+              frames={frames} 
+              library={library} 
+              latestFrames={latestFrames} 
+              selectedSignalNames={visualizerSelectedSignals}
+              setSelectedSignalNames={setVisualizerSelectedSignals}
+            />
+          ) : dashboardTab === 'trace' ? (
+            <div className="flex-1 flex flex-col overflow-hidden p-2 md:p-4 gap-4">
+               <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} onSaveTrace={() => handleSaveTrace(false)} isSaving={isSaving} />
+            </div>
+          ) : (
+            <LibraryPanel 
+              library={library} 
+              onUpdateLibrary={setLibrary} 
+              latestFrames={latestFrames} 
+              onSaveDecoded={() => handleSaveDecodedData(false)}
+              isSavingDecoded={isSavingDecoded}
+            />
+          )}
+        </main>
+
+        <nav className="h-16 md:h-20 bg-white border-t flex items-center justify-around px-2 md:px-4 pb-1 md:pb-2 shrink-0 safe-pb z-[100]">
+          {[
+              { id: 'link', icon: Bluetooth, label: 'LINK' },
+              { id: 'trace', icon: LayoutDashboard, label: 'HUD' },
+              { id: 'library', icon: Database, label: 'DATA' },
+              { id: 'live-visualizer', icon: ChartIcon, label: 'LIVE' },
+              { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
+          ].map(tab => (
+              <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}>
+                  <tab.icon size={18} /><span className="text-[7px] md:text-[8px] font-orbitron font-black uppercase tracking-tighter md:tracking-normal">{tab.label}</span>
+              </button>
+          ))}
+        </nav>
+      </div>
+    );
+  };
+
+  return <div className="h-screen w-full">{renderContent()}</div>;
 };
 
 export default App;
