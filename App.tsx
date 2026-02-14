@@ -46,7 +46,6 @@ const App: React.FC = () => {
   const [baudRate, setBaudRate] = useState(115200);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   
-  // Simulation is strictly OFF to avoid "farzi" (fake) messages
   const [simulationEnabled, setSimulationEnabled] = useState(false);
 
   // LIFTED PERSISTENT STATES
@@ -78,30 +77,12 @@ const App: React.FC = () => {
     setDebugLog(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
   }, []);
 
-  // AUTO-WATCHER ON CONNECTION
   useEffect(() => {
     if (bridgeStatus === 'connected') {
       setWatcherActive(true);
       addDebugLog("AUTO_WATCHER: Hardware link established. Autonomous monitoring activated.");
     }
   }, [bridgeStatus, addDebugLog]);
-
-  // BACKGROUND WATCHER LOGIC
-  useEffect(() => {
-    if (!watcherActive || aiLoading || frames.length === 0) return;
-
-    const hasFault = (Object.values(latestFrames) as CANFrame[]).some(f => {
-      const normId = f.id.replace('0x', '').toUpperCase();
-      if (CRITICAL_FAULT_IDS.some(fid => fid.includes(normId))) {
-        return f.data.some(d => parseInt(d, 16) > 0);
-      }
-      return false;
-    });
-
-    if (hasFault && Date.now() - lastAnalyzedFaultTime.current > 30000) { 
-       triggerAiAnalysis(true);
-    }
-  }, [latestFrames, watcherActive, aiLoading]);
 
   const triggerAiAnalysis = async (isAuto = false) => {
     if (frames.length === 0) return;
@@ -137,33 +118,51 @@ const App: React.FC = () => {
     pendingFramesRef.current.push(newFrame);
   }, [isPaused]);
 
-  // WEB BLUETOOTH HANDLER FOR LAPTOPS
+  // WEB BLUETOOTH HANDLER FOR LAPTOPS - ENHANCED FOR RELIABILITY
   const connectWebBluetooth = async () => {
+    // Cast navigator to any to avoid "Property 'bluetooth' does not exist" error
     if (!(navigator as any).bluetooth) {
-      addDebugLog("ERROR: Web Bluetooth not supported on this browser. Use Chrome/Edge or Mobile HUD App.");
+      addDebugLog("ERROR: Web Bluetooth API not available. Use Chrome or Edge.");
       setBridgeStatus('error');
       return;
     }
+
     try {
       setBridgeStatus('connecting');
-      addDebugLog("SCANNING: Requesting permission for BLE Hardware...");
+      addDebugLog("SCAN: Requesting device with NUS service...");
+      
+      // Some laptops prefer filtering by service UUID directly for faster GATT binding
+      // Cast navigator to any to avoid "Property 'bluetooth' does not exist" error
       const device = await (navigator as any).bluetooth.requestDevice({
-        filters: [{ namePrefix: 'OSM' }, { namePrefix: 'ESP32' }, { namePrefix: 'CAN' }],
+        filters: [
+          { services: [UART_SERVICE_UUID] },
+          { namePrefix: 'OSM' },
+          { namePrefix: 'ESP32' }
+        ],
         optionalServices: [UART_SERVICE_UUID]
       });
 
       webBluetoothDeviceRef.current = device;
-      addDebugLog(`LINK: Connecting to ${device.name || 'Hardware'}...`);
+      addDebugLog(`LINK: Handshaking with ${device.name || 'Hardware'}...`);
       
-      const server = await device.gatt.connect();
-      addDebugLog("LINK: Discovering tactical services...");
+      const server = await device.gatt?.connect();
+      if (!server) {
+        throw new Error("GATT Server connection failed. Is device already connected elsewhere?");
+      }
+
+      addDebugLog("LINK: GATT Connected. Discovering services...");
+      
+      // Tiny delay helps some Windows/macOS drivers stabilize GATT cache
+      await new Promise(r => setTimeout(r, 500));
+      
       const service = await server.getService(UART_SERVICE_UUID);
       const characteristic = await service.getCharacteristic(TX_CHAR_UUID);
 
+      addDebugLog("LINK: NUS characteristic found. Starting stream...");
       await characteristic.startNotifications();
       
       device.addEventListener('gattserverdisconnected', () => {
-        addDebugLog("LINK: BLE device disconnected.");
+        addDebugLog("LINK: Connection dropped by hardware.");
         setBridgeStatus('disconnected');
         setHwStatus('offline');
       });
@@ -193,11 +192,16 @@ const App: React.FC = () => {
       
       setBridgeStatus('connected');
       setHwStatus('active');
-      addDebugLog("BRIDGE: Web Bluetooth Live.");
+      addDebugLog("BRIDGE: Tactical Link Stabilized.");
 
     } catch (err: any) {
       addDebugLog(`BLE_FAULT: ${err.message}`);
       setBridgeStatus('disconnected');
+      if (err.message.includes('User cancelled')) {
+        addDebugLog("SCAN: Search aborted by operator.");
+      } else {
+        addDebugLog("TIP: Ensure device is not paired with another app.");
+      }
     }
   };
 
@@ -250,15 +254,6 @@ const App: React.FC = () => {
       delete (window as any).onNativeBleData;
     };
   }, [addDebugLog, handleNewFrame]);
-
-  useEffect(() => {
-    if (!simulationEnabled || bridgeStatus === 'connected' || bridgeStatus === 'connecting') return;
-    const interval = setInterval(() => {
-        const mock = generateMockPacket(frameMapRef.current, performance.now());
-        handleNewFrame(mock.id.replace('0x',''), mock.dlc, mock.data);
-    }, 500);
-    return () => clearInterval(interval);
-  }, [simulationEnabled, bridgeStatus, handleNewFrame]);
 
   const connectSerial = async () => {
     if (!("serial" in navigator)) {
@@ -318,16 +313,11 @@ const App: React.FC = () => {
     addDebugLog("SYS: Initiating hardware shutdown...");
 
     if (serialReaderRef.current) {
-      try {
-        await serialReaderRef.current.cancel(); 
-      } catch (e) {}
+      try { await serialReaderRef.current.cancel(); } catch (e) {}
     }
 
     if (serialPortRef.current) {
-      try { 
-        await serialPortRef.current.close(); 
-        addDebugLog("SYS: Serial Port closed.");
-      } catch (e) {}
+      try { await serialPortRef.current.close(); } catch (e) {}
       serialPortRef.current = null;
     }
 
@@ -352,7 +342,7 @@ const App: React.FC = () => {
     setFrames([]);
     setLatestFrames({});
     frameMapRef.current.clear();
-    addDebugLog("SYS: Hardware resources fully released.");
+    addDebugLog("SYS: Hardware offline.");
   }, [addDebugLog]);
 
   const handleConnect = () => {
@@ -366,7 +356,6 @@ const App: React.FC = () => {
           setBridgeStatus('connecting');
           (window as any).NativeBleBridge.startBleLink();
         } else {
-          // If Native Bridge is absent (e.g. on laptop browser), use Web Bluetooth API
           connectWebBluetooth();
         }
     } else {
@@ -484,26 +473,16 @@ const App: React.FC = () => {
     }
   }, [frames, library, addDebugLog]);
 
-  // AUTONOMOUS BUFFER MONITORING FOR AUTO-SAVE
   useEffect(() => {
     if (frames.length >= MAX_FRAME_LIMIT && !isAutoSavingRef.current) {
         isAutoSavingRef.current = true;
         addDebugLog(`AUTO_WATCHER: Buffer limit (1M) reached. Initiating autonomous backup...`);
-        
-        // Execute saves
         handleSaveTrace(true);
         handleSaveDecodedData(true);
-        
-        // Purge and reset
         setFrames([]);
         setLatestFrames({});
         frameMapRef.current.clear();
-        addDebugLog("SYS: Buffer purged post autonomous save. Continuing telemetry stream.");
-        
-        // Brief timeout to prevent rapid re-trigger
-        setTimeout(() => {
-          isAutoSavingRef.current = false;
-        }, 5000);
+        setTimeout(() => { isAutoSavingRef.current = false; }, 5000);
     }
   }, [frames.length, handleSaveTrace, handleSaveDecodedData, addDebugLog]);
 
@@ -512,14 +491,7 @@ const App: React.FC = () => {
       if (pendingFramesRef.current.length > 0) {
         const batch = [...pendingFramesRef.current];
         pendingFramesRef.current = [];
-        
-        setFrames(prev => {
-          if (prev.length + batch.length > MAX_FRAME_LIMIT) {
-             return [...prev, ...batch];
-          }
-          return [...prev, ...batch];
-        });
-
+        setFrames(prev => [...prev, ...batch]);
         const latest: Record<string, CANFrame> = {};
         batch.forEach(f => { latest[normalizeId(f.id.replace('0x',''), true)] = f; });
         setLatestFrames(prev => ({ ...prev, ...latest }));
@@ -546,9 +518,9 @@ const App: React.FC = () => {
 
   if (!user) return <AuthScreen onAuthenticated={handleAuthenticated} />;
 
-  const renderContent = () => {
-    if (view === 'home') {
-      return (
+  return (
+    <div className="h-screen w-full font-inter">
+      {view === 'home' ? (
         <div className="h-full w-full flex flex-col items-center justify-center bg-white px-6 relative overflow-hidden">
           <div className="bg-indigo-600 p-6 rounded-[32px] text-white shadow-2xl mb-12 animate-bounce"><Cpu size={64} /></div>
           <h1 className="text-4xl md:text-8xl font-orbitron font-black text-slate-900 uppercase text-center">OSM <span className="text-indigo-600">LIVE</span></h1>
@@ -558,87 +530,83 @@ const App: React.FC = () => {
             <button onClick={handleLogout} className="w-full py-4 text-slate-400 font-bold uppercase text-[10px] tracking-widest flex items-center justify-center gap-2">Terminate Session</button>
           </div>
         </div>
-      );
-    }
-
-    return (
-      <div className="h-full w-full flex flex-col bg-slate-50 safe-pt overflow-hidden relative">
-        <header className="h-14 md:h-16 border-b flex items-center justify-between px-4 md:px-6 bg-white shrink-0 z-[100]">
-          <div className="flex items-center gap-3 md:gap-4">
-            <button onClick={() => setView('home')} className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={18} /></button>
-            <h2 className="text-[10px] md:text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
-          </div>
-          <div className="flex items-center gap-2 md:gap-3">
-            <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-300'}`} />
-          </div>
-        </header>
-
-        <main className="flex-1 overflow-hidden relative flex flex-col min-h-0">
-          {dashboardTab === 'link' ? (
-            <ConnectionPanel 
-              status={bridgeStatus} 
-              hardwareMode={hardwareMode} 
-              onSetHardwareMode={setHardwareMode} 
-              baudRate={baudRate} 
-              setBaudRate={setBaudRate} 
-              onConnect={handleConnect} 
-              onDisconnect={disconnectHardware} 
-              debugLog={debugLog}
-            />
-          ) : dashboardTab === 'analysis' ? (
-            <TraceAnalysisDashboard 
-              frames={frames} 
-              library={library} 
-              latestFrames={latestFrames} 
-              selectedSignalNames={analysisSelectedSignals}
-              setSelectedSignalNames={setAnalysisSelectedSignals}
-              watcherActive={watcherActive}
-              setWatcherActive={setWatcherActive}
-              lastAiAnalysis={lastAiAnalysis}
-              aiLoading={aiLoading}
-              onManualAnalyze={() => triggerAiAnalysis(false)}
-            />
-          ) : dashboardTab === 'live-visualizer' ? (
-            <LiveVisualizerDashboard 
-              frames={frames} 
-              library={library} 
-              latestFrames={latestFrames} 
-              selectedSignalNames={visualizerSelectedSignals}
-              setSelectedSignalNames={setVisualizerSelectedSignals}
-            />
-          ) : dashboardTab === 'trace' ? (
-            <div className="flex-1 flex flex-col overflow-hidden p-2 md:p-4 gap-4">
-               <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} onSaveTrace={() => handleSaveTrace(false)} isSaving={isSaving} />
+      ) : (
+        <div className="h-full w-full flex flex-col bg-slate-50 safe-pt overflow-hidden relative">
+          <header className="h-14 md:h-16 border-b flex items-center justify-between px-4 md:px-6 bg-white shrink-0 z-[100]">
+            <div className="flex items-center gap-3 md:gap-4">
+              <button onClick={() => setView('home')} className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={18} /></button>
+              <h2 className="text-[10px] md:text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
             </div>
-          ) : (
-            <LibraryPanel 
-              library={library} 
-              onUpdateLibrary={setLibrary} 
-              latestFrames={latestFrames} 
-              onSaveDecoded={() => handleSaveDecodedData(false)}
-              isSavingDecoded={isSavingDecoded}
-            />
-          )}
-        </main>
+            <div className="flex items-center gap-2 md:gap-3">
+              <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-300'}`} />
+            </div>
+          </header>
 
-        <nav className="h-16 md:h-20 bg-white border-t flex items-center justify-around px-2 md:px-4 pb-1 md:pb-2 shrink-0 safe-pb z-[100]">
-          {[
-              { id: 'link', icon: Bluetooth, label: 'LINK' },
-              { id: 'trace', icon: LayoutDashboard, label: 'HUD' },
-              { id: 'library', icon: Database, label: 'DATA' },
-              { id: 'live-visualizer', icon: ChartIcon, label: 'LIVE' },
-              { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
-          ].map(tab => (
-              <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}>
-                  <tab.icon size={18} /><span className="text-[7px] md:text-[8px] font-orbitron font-black uppercase tracking-tighter md:tracking-normal">{tab.label}</span>
-              </button>
-          ))}
-        </nav>
-      </div>
-    );
-  };
+          <main className="flex-1 overflow-hidden relative flex flex-col min-h-0">
+            {dashboardTab === 'link' ? (
+              <ConnectionPanel 
+                status={bridgeStatus} 
+                hardwareMode={hardwareMode} 
+                onSetHardwareMode={setHardwareMode} 
+                baudRate={baudRate} 
+                setBaudRate={setBaudRate} 
+                onConnect={handleConnect} 
+                onDisconnect={disconnectHardware} 
+                debugLog={debugLog}
+              />
+            ) : dashboardTab === 'analysis' ? (
+              <TraceAnalysisDashboard 
+                frames={frames} 
+                library={library} 
+                latestFrames={latestFrames} 
+                selectedSignalNames={analysisSelectedSignals}
+                setSelectedSignalNames={setAnalysisSelectedSignals}
+                watcherActive={watcherActive}
+                setWatcherActive={setWatcherActive}
+                lastAiAnalysis={lastAiAnalysis}
+                aiLoading={aiLoading}
+                onManualAnalyze={() => triggerAiAnalysis(false)}
+              />
+            ) : dashboardTab === 'live-visualizer' ? (
+              <LiveVisualizerDashboard 
+                frames={frames} 
+                library={library} 
+                latestFrames={latestFrames} 
+                selectedSignalNames={visualizerSelectedSignals}
+                setSelectedSignalNames={setVisualizerSelectedSignals}
+              />
+            ) : dashboardTab === 'trace' ? (
+              <div className="flex-1 flex flex-col overflow-hidden p-2 md:p-4 gap-4">
+                 <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} onSaveTrace={() => handleSaveTrace(false)} isSaving={isSaving} />
+              </div>
+            ) : (
+              <LibraryPanel 
+                library={library} 
+                onUpdateLibrary={setLibrary} 
+                latestFrames={latestFrames} 
+                onSaveDecoded={() => handleSaveDecodedData(false)}
+                isSavingDecoded={isSavingDecoded}
+              />
+            )}
+          </main>
 
-  return <div className="h-screen w-full">{renderContent()}</div>;
+          <nav className="h-16 md:h-20 bg-white border-t flex items-center justify-around px-2 md:px-4 pb-1 md:pb-2 shrink-0 safe-pb z-[100]">
+            {[
+                { id: 'link', icon: Bluetooth, label: 'LINK' },
+                { id: 'trace', icon: LayoutDashboard, label: 'HUD' },
+                { id: 'library', icon: Database, label: 'DATA' },
+                { id: 'live-visualizer', icon: ChartIcon, label: 'LIVE' },
+                { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
+            ].map(tab => (
+                <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}>
+                    <tab.icon size={18} /><span className="text-[7px] md:text-[8px] font-orbitron font-black uppercase tracking-tighter md:tracking-normal">{tab.label}</span>
+                </button>
+            ))}
+          </nav>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default App;
