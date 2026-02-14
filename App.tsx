@@ -83,7 +83,8 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!watcherActive || aiLoading || frames.length === 0) return;
 
-    const hasFault = Object.values(latestFrames).some(f => {
+    // Added explicit type casting for Object.values(latestFrames) to resolve unknown property errors
+    const hasFault = (Object.values(latestFrames) as CANFrame[]).some(f => {
       const normId = f.id.replace('0x', '').toUpperCase();
       if (CRITICAL_FAULT_IDS.some(fid => fid.includes(normId))) {
         return f.data.some(d => parseInt(d, 16) > 0);
