@@ -7,14 +7,14 @@ import LibraryPanel from '@/components/LibraryPanel';
 import TraceAnalysisDashboard from '@/components/TraceAnalysisDashboard';
 import LiveVisualizerDashboard from '@/components/LiveVisualizerDashboard';
 import AuthScreen from '@/components/AuthScreen';
-import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary, SignalAnalysis } from '@/types';
+import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary, SignalAnalysis, DBCMessage, DBCSignal } from '@/types';
 import { MY_CUSTOM_DBC, DEFAULT_LIBRARY_NAME } from '@/data/dbcProfiles';
-import { normalizeId, formatIdForDisplay } from '@/utils/decoder';
+import { normalizeId, formatIdForDisplay, decodeSignal, cleanMessageName } from '@/utils/decoder';
 import { User, authService } from '@/services/authService';
 import { generateMockPacket } from '@/utils/canSim';
 import { analyzeCANData } from '@/services/geminiService';
 
-const MAX_FRAME_LIMIT = 50000; 
+const MAX_FRAME_LIMIT = 1000000; 
 const BATCH_UPDATE_INTERVAL = 60; 
 const STALE_SIGNAL_TIMEOUT = 5000; 
 const CRITICAL_FAULT_IDS = ["2419654480", "2553303104", "2460002948"];
@@ -36,6 +36,7 @@ const App: React.FC = () => {
   const [latestFrames, setLatestFrames] = useState<Record<string, CANFrame>>({});
   const [isPaused, setIsPaused] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingDecoded, setIsSavingDecoded] = useState(false);
   const [bridgeStatus, setBridgeStatus] = useState<ConnectionStatus>('disconnected');
   const [hwStatus, setHwStatus] = useState<HardwareStatus>('offline');
   const [baudRate, setBaudRate] = useState(115200);
@@ -65,6 +66,7 @@ const App: React.FC = () => {
   const serialReaderRef = useRef<any>(null);
   const keepReadingRef = useRef(false);
   const lastAnalyzedFaultTime = useRef<number>(0);
+  const isAutoSavingRef = useRef(false);
 
   const addDebugLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
@@ -83,7 +85,6 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!watcherActive || aiLoading || frames.length === 0) return;
 
-    // Added explicit type casting for Object.values(latestFrames) to resolve unknown property errors
     const hasFault = (Object.values(latestFrames) as CANFrame[]).some(f => {
       const normId = f.id.replace('0x', '').toUpperCase();
       if (CRITICAL_FAULT_IDS.some(fid => fid.includes(normId))) {
@@ -247,14 +248,12 @@ const App: React.FC = () => {
     keepReadingRef.current = false;
     addDebugLog("SYS: Initiating hardware shutdown...");
 
-    // 1. Force release the serial reader lock
     if (serialReaderRef.current) {
       try {
         await serialReaderRef.current.cancel(); 
       } catch (e) {}
     }
 
-    // 2. Close Serial Port
     if (serialPortRef.current) {
       try { 
         await serialPortRef.current.close(); 
@@ -263,7 +262,6 @@ const App: React.FC = () => {
       serialPortRef.current = null;
     }
 
-    // 3. Disconnect BLE
     if ((window as any).NativeBleBridge) {
       try {
         (window as any).NativeBleBridge.disconnectBle();
@@ -271,7 +269,6 @@ const App: React.FC = () => {
       } catch (e) {}
     }
 
-    // 4. Reset Buffer states
     bleBufferRef.current = "";
     setBridgeStatus('disconnected');
     setHwStatus('offline');
@@ -282,7 +279,6 @@ const App: React.FC = () => {
   }, [addDebugLog]);
 
   const handleConnect = () => {
-    // Force clean the HUD of any potential "farzi" or previous session data
     setSimulationEnabled(false);
     frameMapRef.current.clear();
     setFrames([]);
@@ -296,12 +292,13 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveTrace = useCallback(() => {
+  const handleSaveTrace = useCallback((isAuto = false) => {
     if (frames.length === 0) return;
-    setIsSaving(true);
+    if (!isAuto) setIsSaving(true);
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const fileName = `OSM_Trace_${timestamp}.trc`;
+      const prefix = isAuto ? 'OSM_AUTO_Trace_' : 'OSM_Trace_';
+      const fileName = `${prefix}${timestamp}.trc`;
       let content = "; PCAN Trace File V2.0\n; Timestamp: " + new Date().toLocaleString() + "\n";
       frames.forEach((f, i) => {
         content += `${(i + 1).toString().padStart(6, ' ')}  ${(f.timestamp / 1000).toFixed(4).padStart(12, ' ')}  DT  ${f.id.replace('0x', '').toUpperCase().padStart(12, ' ')}  Rx ${f.dlc.toString().padStart(2, ' ')}  ${f.data.join(' ')}\n`;
@@ -317,20 +314,130 @@ const App: React.FC = () => {
         link.click();
         URL.revokeObjectURL(url);
       }
-      addDebugLog("SUCCESS: Session exported.");
+      addDebugLog(`${isAuto ? 'AUTO_SAVE' : 'SUCCESS'}: Session trace exported.`);
     } catch (e: any) {
       addDebugLog("EXPORT_ERROR: " + e.message);
     } finally {
-      setIsSaving(false);
+      if (!isAuto) setIsSaving(false);
     }
   }, [frames, addDebugLog]);
+
+  const handleSaveDecodedData = useCallback((isAuto = false) => {
+    if (frames.length === 0) return;
+    if (!isAuto) setIsSavingDecoded(true);
+    try {
+      const timestampStr = new Date().toISOString().replace(/[:.]/g, '-');
+      const prefix = isAuto ? 'OSM_AUTO_Decoded_' : 'OSM_Decoded_Live_';
+      const fileName = `${prefix}${timestampStr}.csv`;
+      
+      const seenIds = new Set<string>();
+      frames.forEach(f => {
+        seenIds.add(normalizeId(f.id.replace('0x', ''), true));
+      });
+
+      const activeSignalsMap = new Map<string, DBCSignal>();
+      const allActiveSignalNames: string[] = [];
+
+      (Object.entries(library.database) as [string, DBCMessage][]).forEach(([id, msg]) => {
+        const normId = normalizeId(id, false);
+        if (seenIds.has(normId)) {
+          Object.values(msg.signals).forEach(sig => {
+            if (!activeSignalsMap.has(sig.name)) {
+              activeSignalsMap.set(sig.name, sig);
+              allActiveSignalNames.push(sig.name);
+            }
+          });
+        }
+      });
+      
+      if (allActiveSignalNames.length === 0) {
+        addDebugLog("EXPORT_ERROR: No decoded signals found for captured messages.");
+        if (!isAuto) setIsSavingDecoded(false);
+        return;
+      }
+
+      allActiveSignalNames.sort(); 
+
+      let csv = "timestamp," + allActiveSignalNames.join(",") + "\n";
+      const lastKnownValues: Record<string, string> = {};
+      allActiveSignalNames.forEach(name => lastKnownValues[name] = "0");
+
+      frames.forEach(f => {
+        const normFrameId = normalizeId(f.id.replace('0x', ''), true);
+        const dbe = (Object.entries(library.database) as [string, DBCMessage][]).find(
+          ([id]) => normalizeId(id, false) === normFrameId
+        );
+
+        if (dbe) {
+          const [_, msg] = dbe;
+          Object.values(msg.signals).forEach(sig => {
+            if (activeSignalsMap.has(sig.name)) {
+               const valStr = decodeSignal(f.data, sig);
+               const cleanVal = valStr.replace(/[a-zA-Z%]/g, '').trim() || "0";
+               lastKnownValues[sig.name] = cleanVal;
+            }
+          });
+          const rowValues = allActiveSignalNames.map(name => lastKnownValues[name]);
+          csv += `${(f.timestamp / 1000).toFixed(6)},${rowValues.join(",")}\n`;
+        }
+      });
+
+      if ((window as any).AndroidInterface?.saveFile) {
+        (window as any).AndroidInterface.saveFile(csv, fileName);
+      } else {
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+      addDebugLog(`${isAuto ? 'AUTO_SAVE' : 'SUCCESS'}: Decoded data exported.`);
+    } catch (e: any) {
+      addDebugLog("EXPORT_ERROR: " + e.message);
+      console.error(e);
+    } finally {
+      if (!isAuto) setIsSavingDecoded(false);
+    }
+  }, [frames, library, addDebugLog]);
+
+  // AUTONOMOUS BUFFER MONITORING FOR AUTO-SAVE
+  useEffect(() => {
+    if (frames.length >= MAX_FRAME_LIMIT && !isAutoSavingRef.current) {
+        isAutoSavingRef.current = true;
+        addDebugLog(`AUTO_WATCHER: Buffer limit (1M) reached. Initiating autonomous backup...`);
+        
+        // Execute saves
+        handleSaveTrace(true);
+        handleSaveDecodedData(true);
+        
+        // Purge and reset
+        setFrames([]);
+        setLatestFrames({});
+        frameMapRef.current.clear();
+        addDebugLog("SYS: Buffer purged post autonomous save. Continuing telemetry stream.");
+        
+        // Brief timeout to prevent rapid re-trigger
+        setTimeout(() => {
+          isAutoSavingRef.current = false;
+        }, 5000);
+    }
+  }, [frames.length, handleSaveTrace, handleSaveDecodedData, addDebugLog]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       if (pendingFramesRef.current.length > 0) {
         const batch = [...pendingFramesRef.current];
         pendingFramesRef.current = [];
-        setFrames(prev => prev.length + batch.length >= MAX_FRAME_LIMIT ? [] : [...prev, ...batch]);
+        
+        setFrames(prev => {
+          if (prev.length + batch.length > MAX_FRAME_LIMIT) {
+             return [...prev, ...batch];
+          }
+          return [...prev, ...batch];
+        });
+
         const latest: Record<string, CANFrame> = {};
         batch.forEach(f => { latest[normalizeId(f.id.replace('0x',''), true)] = f; });
         setLatestFrames(prev => ({ ...prev, ...latest }));
@@ -374,13 +481,13 @@ const App: React.FC = () => {
 
     return (
       <div className="h-full w-full flex flex-col bg-slate-50 safe-pt overflow-hidden relative">
-        <header className="h-16 border-b flex items-center justify-between px-6 bg-white shrink-0 z-[100]">
-          <div className="flex items-center gap-4">
-            <button onClick={() => setView('home')} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={20} /></button>
-            <h2 className="text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
+        <header className="h-14 md:h-16 border-b flex items-center justify-between px-4 md:px-6 bg-white shrink-0 z-[100]">
+          <div className="flex items-center gap-3 md:gap-4">
+            <button onClick={() => setView('home')} className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={18} /></button>
+            <h2 className="text-[10px] md:text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
           </div>
-          <div className="flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-300'}`} />
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-300'}`} />
           </div>
         </header>
 
@@ -418,24 +525,30 @@ const App: React.FC = () => {
               setSelectedSignalNames={setVisualizerSelectedSignals}
             />
           ) : dashboardTab === 'trace' ? (
-            <div className="flex-1 flex flex-col overflow-hidden p-4 gap-4">
-               <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} onSaveTrace={handleSaveTrace} isSaving={isSaving} />
+            <div className="flex-1 flex flex-col overflow-hidden p-2 md:p-4 gap-4">
+               <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} onSaveTrace={() => handleSaveTrace(false)} isSaving={isSaving} />
             </div>
           ) : (
-            <LibraryPanel library={library} onUpdateLibrary={setLibrary} latestFrames={latestFrames} />
+            <LibraryPanel 
+              library={library} 
+              onUpdateLibrary={setLibrary} 
+              latestFrames={latestFrames} 
+              onSaveDecoded={() => handleSaveDecodedData(false)}
+              isSavingDecoded={isSavingDecoded}
+            />
           )}
         </main>
 
-        <nav className="h-20 bg-white border-t flex items-center justify-around px-4 pb-2 shrink-0 safe-pb z-[100]">
+        <nav className="h-16 md:h-20 bg-white border-t flex items-center justify-around px-2 md:px-4 pb-1 md:pb-2 shrink-0 safe-pb z-[100]">
           {[
               { id: 'link', icon: Bluetooth, label: 'LINK' },
-              { id: 'trace', icon: LayoutDashboard, label: 'DASHBOARD' },
+              { id: 'trace', icon: LayoutDashboard, label: 'HUD' },
               { id: 'library', icon: Database, label: 'DATA' },
-              { id: 'live-visualizer', icon: ChartIcon, label: 'LIVE VISUALIZER' },
+              { id: 'live-visualizer', icon: ChartIcon, label: 'LIVE' },
               { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
           ].map(tab => (
-              <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1.5 px-4 py-2 rounded-2xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}>
-                  <tab.icon size={20} /><span className="text-[8px] font-orbitron font-black uppercase">{tab.label}</span>
+              <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}>
+                  <tab.icon size={18} /><span className="text-[7px] md:text-[8px] font-orbitron font-black uppercase tracking-tighter md:tracking-normal">{tab.label}</span>
               </button>
           ))}
         </nav>

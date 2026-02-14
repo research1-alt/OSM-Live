@@ -62,11 +62,9 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
     const searchLower = searchTerm.toLowerCase();
     const now = performance.now();
 
-    // Added explicit type casting for Object.entries(latestFrames) to resolve unknown property errors
     (Object.entries(latestFrames) as [string, CANFrame][]).forEach(([normId, frame]) => {
       if (now - frame.timestamp > LIVE_TIMEOUT_MS) return;
 
-      // Added explicit type casting for Object.entries(library.database) to resolve unknown property errors
       const dbe = (Object.entries(library.database) as [string, DBCMessage][]).find(([decId]) => normalizeId(decId) === normId);
       if (dbe) {
         const [id, msg] = dbe;
@@ -105,7 +103,7 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
 
   const sidebarContent = (
     <div className="flex flex-col h-full">
-      <div className="p-6 pb-4 flex flex-col gap-4 shrink-0">
+      <div className="p-4 md:p-6 pb-4 flex flex-col gap-4 shrink-0">
         <div className="flex items-center justify-between">
           <h3 className="text-[10px] font-orbitron font-black text-indigo-600 uppercase tracking-widest flex items-center gap-2">
             <Activity size={14} /> SIGNAL_MATRIX
@@ -135,7 +133,7 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
             <div key={group.id} className="mb-1">
               <button 
                 onClick={() => setExpandedGroups(prev => prev.includes(group.id) ? prev.filter(g => g !== group.id) : [...prev, group.id])} 
-                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-white rounded text-left transition-colors group"
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white rounded text-left transition-colors group"
               >
                 {expandedGroups.includes(group.id) ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
                 <span className="text-[10px] font-bold text-slate-700 group-hover:text-indigo-600 uppercase truncate">{group.name}</span>
@@ -146,7 +144,7 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
                     <button 
                       key={sig} 
                       onClick={() => toggleSignalSelection(sig)} 
-                      className={`w-full flex items-center gap-2 px-3 py-1 rounded text-left text-[9px] transition-all ${selectedSignalNames.includes(sig) ? 'text-indigo-600 bg-indigo-50 font-black' : 'text-slate-400 hover:text-slate-600 font-medium'}`}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded text-left text-[9px] transition-all ${selectedSignalNames.includes(sig) ? 'text-indigo-600 bg-indigo-50 font-black' : 'text-slate-400 hover:text-slate-600 font-medium'}`}
                     >
                       <div className={`w-2 h-2 rounded-sm border ${selectedSignalNames.includes(sig) ? 'bg-indigo-600 border-indigo-500' : 'border-slate-300'}`} />
                       {sig}
@@ -163,15 +161,10 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
 
   return (
     <div className="flex h-full w-full bg-white overflow-hidden relative">
-      {/* Sidebar Overlay for mobile */}
       {isSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[150] lg:hidden"
-          onClick={() => setIsSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[150] lg:hidden" onClick={() => setIsSidebarOpen(false)} />
       )}
 
-      {/* Sidebar Desktop/Drawer */}
       <aside className={`
         fixed lg:static inset-y-0 left-0 z-[160] w-72 lg:w-80 bg-slate-50 border-r border-slate-200 transform transition-transform duration-300 ease-in-out
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
@@ -179,34 +172,24 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
         {sidebarContent}
       </aside>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col bg-white overflow-hidden p-4 lg:p-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 shrink-0 gap-4">
+      <div className="flex-1 flex flex-col bg-white overflow-hidden p-3 md:p-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 md:mb-6 shrink-0 gap-3">
           <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setIsSidebarOpen(true)}
-              className="lg:hidden p-2 bg-indigo-600 text-white rounded-xl shadow-lg"
-            >
-              <Menu size={20} />
+            <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden p-1.5 bg-indigo-600 text-white rounded-lg shadow-lg">
+              <Menu size={18} />
             </button>
             <div>
-              <h2 className="text-xl lg:text-2xl font-orbitron font-black text-slate-900 uppercase tracking-tight">LIVE_ANALYSIS</h2>
-              <p className="text-[8px] lg:text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Aggregate Telemetry Matrix</p>
+              <h2 className="text-lg md:text-2xl font-orbitron font-black text-slate-900 uppercase tracking-tight">LIVE_ANALYSIS</h2>
+              <p className="text-[7px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest">Aggregate Telemetry Matrix</p>
             </div>
           </div>
           
-          <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl w-full md:w-auto overflow-x-auto no-scrollbar">
-             <button 
-               onClick={() => setViewMode('stats')} 
-               className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 lg:px-6 py-2 rounded-xl text-[9px] lg:text-[10px] font-orbitron font-black uppercase transition-all whitespace-nowrap ${viewMode === 'stats' ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-400'}`}
-             >
-               <BarChart3 size={16}/> STATS
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-full md:w-auto overflow-x-auto no-scrollbar">
+             <button onClick={() => setViewMode('stats')} className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-3 md:px-6 py-1.5 rounded-lg text-[8px] md:text-[10px] font-orbitron font-black uppercase transition-all whitespace-nowrap ${viewMode === 'stats' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}>
+               <BarChart3 size={14}/> STATS
              </button>
-             <button 
-               onClick={() => setViewMode('ai')} 
-               className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 lg:px-6 py-2 rounded-xl text-[9px] lg:text-[10px] font-orbitron font-black uppercase transition-all whitespace-nowrap ${viewMode === 'ai' ? 'bg-white text-indigo-600 shadow-md' : 'text-slate-400'}`}
-             >
-               <BrainCircuit size={16}/> GEMINI
+             <button onClick={() => setViewMode('ai')} className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-3 md:px-6 py-1.5 rounded-lg text-[8px] md:text-[10px] font-orbitron font-black uppercase transition-all whitespace-nowrap ${viewMode === 'ai' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}>
+               <BrainCircuit size={14}/> GEMINI
              </button>
           </div>
         </div>
@@ -227,39 +210,39 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
             <>
               {selectedSignalNames.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-8 opacity-30">
-                  <BarChart3 size={48} className="mb-6 text-indigo-200" />
-                  <h4 className="text-[10px] font-orbitron font-black uppercase tracking-[0.4em]">Matrix_Idle</h4>
-                  <p className="text-[8px] font-bold uppercase mt-2 max-w-xs">Select signals from the matrix to begin computation</p>
-                  <button onClick={() => setIsSidebarOpen(true)} className="mt-6 lg:hidden px-6 py-3 bg-indigo-600 text-white rounded-xl text-[9px] font-orbitron font-black uppercase">Open Matrix</button>
+                  <BarChart3 size={40} className="mb-4 text-indigo-200" />
+                  <h4 className="text-[9px] font-orbitron font-black uppercase tracking-[0.4em]">Matrix_Idle</h4>
+                  <p className="text-[7px] font-bold uppercase mt-2 max-w-xs px-6">Select signals from the matrix to begin computation</p>
+                  <button onClick={() => setIsSidebarOpen(true)} className="mt-6 lg:hidden px-5 py-2.5 bg-indigo-600 text-white rounded-lg text-[8px] font-orbitron font-black uppercase">Open Matrix</button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6 pb-20">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-6 pb-20">
                   {allStats.map(stat => (
-                    <div key={stat.name} className="bg-white border border-slate-100 rounded-[24px] lg:rounded-[32px] p-5 lg:p-6 shadow-sm hover:shadow-xl transition-all group animate-in zoom-in duration-300">
-                      <div className="flex items-center justify-between mb-4 lg:mb-6">
-                        <div className="flex items-center gap-3 overflow-hidden">
-                          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors shrink-0">
-                            <TrendingUp size={16} />
+                    <div key={stat.name} className="bg-white border border-slate-100 rounded-2xl md:rounded-[32px] p-4 md:p-6 shadow-sm hover:shadow-xl transition-all group animate-in zoom-in duration-300">
+                      <div className="flex items-center justify-between mb-3 md:mb-6">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors shrink-0">
+                            <TrendingUp size={14} />
                           </div>
-                          <h4 className="text-[10px] lg:text-[11px] font-orbitron font-black uppercase tracking-wider text-slate-800 truncate">{stat.name.replace(/_/g, ' ')}</h4>
+                          <h4 className="text-[9px] md:text-[11px] font-orbitron font-black uppercase tracking-wider text-slate-800 truncate">{stat.name.replace(/_/g, ' ')}</h4>
                         </div>
                         <button onClick={() => toggleSignalSelection(stat.name)} className="p-1 text-slate-300 hover:text-red-500 transition-colors shrink-0">
                           <XCircle size={14} />
                         </button>
                       </div>
                       
-                      <div className="space-y-2 lg:space-y-3">
-                        <div className="flex justify-between items-center p-3 lg:p-4 bg-slate-50 rounded-xl lg:rounded-2xl border border-slate-100/50">
-                          <span className="text-[8px] lg:text-[9px] font-orbitron font-black text-slate-400 uppercase">Min</span>
-                          <span className="text-base lg:text-lg font-orbitron font-black text-emerald-600">{stat.min.toFixed(2)}</span>
+                      <div className="space-y-1.5 md:space-y-3">
+                        <div className="flex justify-between items-center p-2 md:p-4 bg-slate-50 rounded-xl border border-slate-100/50">
+                          <span className="text-[7px] md:text-[9px] font-orbitron font-black text-slate-400 uppercase">Min</span>
+                          <span className="text-sm md:text-lg font-orbitron font-black text-emerald-600">{stat.min.toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between items-center p-3 lg:p-4 bg-slate-50 rounded-xl lg:rounded-2xl border border-slate-100/50">
-                          <span className="text-[8px] lg:text-[9px] font-orbitron font-black text-slate-400 uppercase">Max</span>
-                          <span className="text-base lg:text-lg font-orbitron font-black text-indigo-600">{stat.max.toFixed(2)}</span>
+                        <div className="flex justify-between items-center p-2 md:p-4 bg-slate-50 rounded-xl border border-slate-100/50">
+                          <span className="text-[7px] md:text-[9px] font-orbitron font-black text-slate-400 uppercase">Max</span>
+                          <span className="text-sm md:text-lg font-orbitron font-black text-indigo-600">{stat.max.toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between items-center p-3 lg:p-4 bg-slate-50 rounded-xl lg:rounded-2xl border border-slate-100/50">
-                          <span className="text-[8px] lg:text-[9px] font-orbitron font-black text-slate-400 uppercase">Avg</span>
-                          <span className="text-base lg:text-lg font-orbitron font-black text-slate-900">{stat.avg.toFixed(2)}</span>
+                        <div className="flex justify-between items-center p-2 md:p-4 bg-slate-50 rounded-xl border border-slate-100/50">
+                          <span className="text-[7px] md:text-[9px] font-orbitron font-black text-slate-400 uppercase">Avg</span>
+                          <span className="text-sm md:text-lg font-orbitron font-black text-slate-900">{stat.avg.toFixed(2)}</span>
                         </div>
                       </div>
                     </div>
