@@ -109,16 +109,17 @@ const ConnectionPanel: React.FC<ConnectionPanelProps> = ({
                 onClick={() => onSetHardwareMode('esp32-serial')} 
                 className={`flex flex-col items-center gap-3 p-5 rounded-[24px] border transition-all ${hardwareMode === 'esp32-serial' ? 'bg-indigo-600 border-indigo-700 text-white shadow-xl scale-105' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'}`}
               >
-                <Cable size={24}/><span className="text-[11px] font-orbitron font-black uppercase tracking-widest">Wired_Link</span>
+                <Cable size={24}/><span className="text-[9px] font-orbitron font-black uppercase">Wired</span>
               </button>
               <button 
                 onClick={() => onSetHardwareMode('esp32-bt')} 
                 className={`flex flex-col items-center gap-3 p-5 rounded-[24px] border transition-all ${hardwareMode === 'esp32-bt' ? 'bg-indigo-600 border-indigo-700 text-white shadow-xl scale-105' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'}`}
               >
-                <Bluetooth size={24}/><span className="text-[11px] font-orbitron font-black uppercase tracking-widest">BLE_Wireless</span>
+                <Bluetooth size={24}/><span className="text-[9px] font-orbitron font-black uppercase">BLE</span>
               </button>
             </div>
 
+            {/* Link Intelligence Area - Replaces Bridge Console */}
             <div className={`mb-8 p-6 rounded-[32px] border transition-all duration-500 shadow-inner ${currentStatus.color}`}>
                <div className="flex items-center gap-4 mb-3">
                   <div className="p-2.5 bg-white rounded-2xl shadow-sm">

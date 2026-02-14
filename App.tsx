@@ -19,6 +19,10 @@ const BATCH_UPDATE_INTERVAL = 60;
 const STALE_SIGNAL_TIMEOUT = 5000; 
 const CRITICAL_FAULT_IDS = ["2419654480", "2553303104", "2460002948"];
 
+// Nordic UART Service UUIDs used by ESP32 Firmware
+const UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
 type PreviewMode = 'full' | 'mobile' | 'tablet';
 
 const App: React.FC = () => {
@@ -64,6 +68,7 @@ const App: React.FC = () => {
   const bleBufferRef = useRef<string>("");
   const serialPortRef = useRef<any>(null);
   const serialReaderRef = useRef<any>(null);
+  const webBluetoothDeviceRef = useRef<any>(null);
   const keepReadingRef = useRef(false);
   const lastAnalyzedFaultTime = useRef<number>(0);
   const isAutoSavingRef = useRef(false);
@@ -131,6 +136,70 @@ const App: React.FC = () => {
     frameMapRef.current.set(normId, newFrame);
     pendingFramesRef.current.push(newFrame);
   }, [isPaused]);
+
+  // WEB BLUETOOTH HANDLER FOR LAPTOPS
+  const connectWebBluetooth = async () => {
+    if (!(navigator as any).bluetooth) {
+      addDebugLog("ERROR: Web Bluetooth not supported on this browser. Use Chrome/Edge or Mobile HUD App.");
+      setBridgeStatus('error');
+      return;
+    }
+    try {
+      setBridgeStatus('connecting');
+      addDebugLog("SCANNING: Requesting permission for BLE Hardware...");
+      const device = await (navigator as any).bluetooth.requestDevice({
+        filters: [{ namePrefix: 'OSM' }, { namePrefix: 'ESP32' }, { namePrefix: 'CAN' }],
+        optionalServices: [UART_SERVICE_UUID]
+      });
+
+      webBluetoothDeviceRef.current = device;
+      addDebugLog(`LINK: Connecting to ${device.name || 'Hardware'}...`);
+      
+      const server = await device.gatt.connect();
+      addDebugLog("LINK: Discovering tactical services...");
+      const service = await server.getService(UART_SERVICE_UUID);
+      const characteristic = await service.getCharacteristic(TX_CHAR_UUID);
+
+      await characteristic.startNotifications();
+      
+      device.addEventListener('gattserverdisconnected', () => {
+        addDebugLog("LINK: BLE device disconnected.");
+        setBridgeStatus('disconnected');
+        setHwStatus('offline');
+      });
+
+      characteristic.addEventListener('characteristicvaluechanged', (event: any) => {
+        const value = event.target.value;
+        const decoder = new TextDecoder();
+        const chunk = decoder.decode(value);
+        
+        bleBufferRef.current += chunk;
+        if (bleBufferRef.current.includes('\n')) {
+          const lines = bleBufferRef.current.split('\n');
+          bleBufferRef.current = lines.pop() || "";
+          for (const line of lines) {
+            const cleanLine = line.trim();
+            if (!cleanLine) continue;
+            const parts = cleanLine.split('#');
+            if (parts.length >= 3) handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
+          }
+        }
+      });
+
+      setSimulationEnabled(false);
+      setFrames([]);
+      setLatestFrames({});
+      frameMapRef.current.clear();
+      
+      setBridgeStatus('connected');
+      setHwStatus('active');
+      addDebugLog("BRIDGE: Web Bluetooth Live.");
+
+    } catch (err: any) {
+      addDebugLog(`BLE_FAULT: ${err.message}`);
+      setBridgeStatus('disconnected');
+    }
+  };
 
   useEffect(() => {
     const cleanupInterval = setInterval(() => {
@@ -262,10 +331,18 @@ const App: React.FC = () => {
       serialPortRef.current = null;
     }
 
+    if (webBluetoothDeviceRef.current?.gatt.connected) {
+      try {
+        webBluetoothDeviceRef.current.gatt.disconnect();
+        addDebugLog("SYS: Web BLE Link closed.");
+      } catch (e) {}
+      webBluetoothDeviceRef.current = null;
+    }
+
     if ((window as any).NativeBleBridge) {
       try {
         (window as any).NativeBleBridge.disconnectBle();
-        addDebugLog("SYS: BLE Link terminated.");
+        addDebugLog("SYS: Native BLE Link terminated.");
       } catch (e) {}
     }
 
@@ -285,8 +362,13 @@ const App: React.FC = () => {
     setLatestFrames({});
     
     if (hardwareMode === 'esp32-bt') {
-        setBridgeStatus('connecting');
-        (window as any).NativeBleBridge?.startBleLink();
+        if ((window as any).NativeBleBridge) {
+          setBridgeStatus('connecting');
+          (window as any).NativeBleBridge.startBleLink();
+        } else {
+          // If Native Bridge is absent (e.g. on laptop browser), use Web Bluetooth API
+          connectWebBluetooth();
+        }
     } else {
         connectSerial();
     }
@@ -327,7 +409,7 @@ const App: React.FC = () => {
     if (!isAuto) setIsSavingDecoded(true);
     try {
       const timestampStr = new Date().toISOString().replace(/[:.]/g, '-');
-      const prefix = isAuto ? 'OSM_AUTO_Decoded_' : 'OSM_Decoded_Live_';
+      const prefix = isAuto ? 'OSM_AUTO_Decoded_' : 'OSed_Decoded_Live_';
       const fileName = `${prefix}${timestampStr}.csv`;
       
       const seenIds = new Set<string>();
