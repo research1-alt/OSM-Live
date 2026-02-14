@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, Pause, Cpu, ArrowLeft, Activity, Bluetooth, Zap, BarChart3, Database, LogOut, ExternalLink, LayoutDashboard, ShieldCheck, Settings2, Smartphone, Tablet, Monitor, LineChart as ChartIcon, Info, HelpCircle } from 'lucide-react';
+import { Play, Pause, Cpu, ArrowLeft, Activity, Bluetooth, Zap, BarChart3, Database, LogOut, ExternalLink, LayoutDashboard, ShieldCheck, Settings2, Smartphone, Tablet, Monitor, LineChart as ChartIcon, Info, HelpCircle, AlertTriangle } from 'lucide-react';
 import CANMonitor from '@/components/CANMonitor';
 import ConnectionPanel from '@/components/ConnectionPanel';
 import LibraryPanel from '@/components/LibraryPanel';
@@ -19,7 +19,7 @@ const BATCH_UPDATE_INTERVAL = 60;
 const STALE_SIGNAL_TIMEOUT = 5000; 
 const CRITICAL_FAULT_IDS = ["2419654480", "2553303104", "2460002948"];
 
-// Nordic UART Service UUIDs used by ESP32 Firmware
+// Nordic UART Service UUIDs (Standard for ESP32/Arduino BLE)
 const UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
@@ -33,7 +33,6 @@ const App: React.FC = () => {
   
   const [sessionId, setSessionId] = useState<string | null>(() => localStorage.getItem('osm_sid'));
   const [view, setView] = useState<'home' | 'live'>('home');
-  const [previewMode, setPreviewMode] = useState('full' as PreviewMode);
   const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis' | 'live-visualizer'>('link');
   const [hardwareMode, setHardwareMode] = useState<'esp32-serial' | 'esp32-bt'>('esp32-bt');
   const [frames, setFrames] = useState<CANFrame[]>([]);
@@ -48,7 +47,7 @@ const App: React.FC = () => {
   
   const [simulationEnabled, setSimulationEnabled] = useState(false);
 
-  // LIFTED PERSISTENT STATES
+  // Persistence for UI state
   const [analysisSelectedSignals, setAnalysisSelectedSignals] = useState<string[]>([]);
   const [visualizerSelectedSignals, setVisualizerSelectedSignals] = useState<string[]>([]);
   const [watcherActive, setWatcherActive] = useState(false);
@@ -77,10 +76,11 @@ const App: React.FC = () => {
     setDebugLog(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
   }, []);
 
+  // AI Watcher Logic
   useEffect(() => {
     if (bridgeStatus === 'connected') {
       setWatcherActive(true);
-      addDebugLog("AUTO_WATCHER: Hardware link established. Autonomous monitoring activated.");
+      addDebugLog("AUTO_WATCHER: Hardware link established.");
     }
   }, [bridgeStatus, addDebugLog]);
 
@@ -92,7 +92,7 @@ const App: React.FC = () => {
       setLastAiAnalysis({ ...result, isAutomatic: isAuto });
       if (isAuto) lastAnalyzedFaultTime.current = Date.now();
     } catch (e) {
-      addDebugLog("AI_ERROR: Failed to fetch insights.");
+      addDebugLog("AI_ERROR: Analysis request failed.");
     } finally {
       setAiLoading(false);
     }
@@ -118,55 +118,58 @@ const App: React.FC = () => {
     pendingFramesRef.current.push(newFrame);
   }, [isPaused]);
 
-  // WEB BLUETOOTH HANDLER FOR LAPTOPS - ENHANCED FOR RELIABILITY
+  /**
+   * WEB BLUETOOTH HANDLER FOR LAPTOPS - MISSION CRITICAL FIX
+   * Addresses "Visible but not connecting" by resetting GATT and adding stack stabilization.
+   */
   const connectWebBluetooth = async () => {
-    // Cast navigator to any to avoid "Property 'bluetooth' does not exist" error
     if (!(navigator as any).bluetooth) {
-      addDebugLog("ERROR: Web Bluetooth API not available. Use Chrome or Edge.");
+      addDebugLog("ERROR: Web Bluetooth API not supported. Use Chrome or Edge.");
       setBridgeStatus('error');
       return;
     }
 
     try {
+      // 1. Pre-connection Cleanup
+      if (webBluetoothDeviceRef.current && webBluetoothDeviceRef.current.gatt?.connected) {
+        addDebugLog("SCAN: Dropping stale connection...");
+        await webBluetoothDeviceRef.current.gatt.disconnect();
+      }
+
       setBridgeStatus('connecting');
-      addDebugLog("SCAN: Requesting device with NUS service...");
+      addDebugLog("SCAN: Opening Secure Device Selector...");
       
-      // Some laptops prefer filtering by service UUID directly for faster GATT binding
-      // Cast navigator to any to avoid "Property 'bluetooth' does not exist" error
       const device = await (navigator as any).bluetooth.requestDevice({
-        filters: [
-          { services: [UART_SERVICE_UUID] },
-          { namePrefix: 'OSM' },
-          { namePrefix: 'ESP32' }
-        ],
+        filters: [{ services: [UART_SERVICE_UUID] }],
         optionalServices: [UART_SERVICE_UUID]
       });
 
       webBluetoothDeviceRef.current = device;
-      addDebugLog(`LINK: Handshaking with ${device.name || 'Hardware'}...`);
-      
-      const server = await device.gatt?.connect();
-      if (!server) {
-        throw new Error("GATT Server connection failed. Is device already connected elsewhere?");
-      }
+      addDebugLog(`LINK: Bonding with ${device.name || 'Hardware'}...`);
 
-      addDebugLog("LINK: GATT Connected. Discovering services...");
-      
-      // Tiny delay helps some Windows/macOS drivers stabilize GATT cache
-      await new Promise(r => setTimeout(r, 500));
-      
-      const service = await server.getService(UART_SERVICE_UUID);
-      const characteristic = await service.getCharacteristic(TX_CHAR_UUID);
-
-      addDebugLog("LINK: NUS characteristic found. Starting stream...");
-      await characteristic.startNotifications();
-      
       device.addEventListener('gattserverdisconnected', () => {
-        addDebugLog("LINK: Connection dropped by hardware.");
+        addDebugLog("LINK: Terminal disconnected.");
         setBridgeStatus('disconnected');
         setHwStatus('offline');
       });
 
+      // 2. High-Stability GATT Connection
+      addDebugLog("LINK: Initializing GATT Stack...");
+      const server = await device.gatt.connect();
+      
+      // 3. Stabilization Delay (Critical for Windows/macOS drivers)
+      addDebugLog("LINK: Stabilization delay (1500ms)...");
+      await new Promise(r => setTimeout(r, 1500));
+      
+      addDebugLog("LINK: Discovering Services...");
+      const service = await server.getService(UART_SERVICE_UUID);
+      
+      addDebugLog("LINK: Locating Data Channel...");
+      const characteristic = await service.getCharacteristic(TX_CHAR_UUID);
+
+      addDebugLog("LINK: Subscribing to telemetry stream...");
+      await characteristic.startNotifications();
+      
       characteristic.addEventListener('characteristicvaluechanged', (event: any) => {
         const value = event.target.value;
         const decoder = new TextDecoder();
@@ -178,7 +181,7 @@ const App: React.FC = () => {
           bleBufferRef.current = lines.pop() || "";
           for (const line of lines) {
             const cleanLine = line.trim();
-            if (!cleanLine) continue;
+            if (!cleanLine || !cleanLine.includes('#')) continue;
             const parts = cleanLine.split('#');
             if (parts.length >= 3) handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
           }
@@ -197,10 +200,13 @@ const App: React.FC = () => {
     } catch (err: any) {
       addDebugLog(`BLE_FAULT: ${err.message}`);
       setBridgeStatus('disconnected');
+      
       if (err.message.includes('User cancelled')) {
-        addDebugLog("SCAN: Search aborted by operator.");
+        addDebugLog("SCAN: Operation aborted by operator.");
+      } else if (err.message.includes('GATT')) {
+        addDebugLog("TIP: Unpair device from Windows/macOS Settings first.");
       } else {
-        addDebugLog("TIP: Ensure device is not paired with another app.");
+        addDebugLog("TIP: Ensure device is not connected to mobile app.");
       }
     }
   };
@@ -223,6 +229,7 @@ const App: React.FC = () => {
     return () => clearInterval(cleanupInterval);
   }, []);
 
+  // Native Mobile Bridge Listeners
   useEffect(() => {
     (window as any).onNativeBleLog = (msg: string) => addDebugLog(msg);
     (window as any).onNativeBleStatus = (status: string) => {
@@ -310,7 +317,7 @@ const App: React.FC = () => {
 
   const disconnectHardware = useCallback(async () => {
     keepReadingRef.current = false;
-    addDebugLog("SYS: Initiating hardware shutdown...");
+    addDebugLog("SYS: Terminating tactical links...");
 
     if (serialReaderRef.current) {
       try { await serialReaderRef.current.cancel(); } catch (e) {}
@@ -323,8 +330,8 @@ const App: React.FC = () => {
 
     if (webBluetoothDeviceRef.current?.gatt.connected) {
       try {
-        webBluetoothDeviceRef.current.gatt.disconnect();
-        addDebugLog("SYS: Web BLE Link closed.");
+        await webBluetoothDeviceRef.current.gatt.disconnect();
+        addDebugLog("SYS: Web BLE link closed.");
       } catch (e) {}
       webBluetoothDeviceRef.current = null;
     }
@@ -332,7 +339,7 @@ const App: React.FC = () => {
     if ((window as any).NativeBleBridge) {
       try {
         (window as any).NativeBleBridge.disconnectBle();
-        addDebugLog("SYS: Native BLE Link terminated.");
+        addDebugLog("SYS: Native BLE link closed.");
       } catch (e) {}
     }
 
@@ -342,7 +349,7 @@ const App: React.FC = () => {
     setFrames([]);
     setLatestFrames({});
     frameMapRef.current.clear();
-    addDebugLog("SYS: Hardware offline.");
+    addDebugLog("SYS: Hardware resources released.");
   }, [addDebugLog]);
 
   const handleConnect = () => {
@@ -398,7 +405,7 @@ const App: React.FC = () => {
     if (!isAuto) setIsSavingDecoded(true);
     try {
       const timestampStr = new Date().toISOString().replace(/[:.]/g, '-');
-      const prefix = isAuto ? 'OSM_AUTO_Decoded_' : 'OSed_Decoded_Live_';
+      const prefix = isAuto ? 'OSM_AUTO_Decoded_' : 'OSM_Decoded_Live_';
       const fileName = `${prefix}${timestampStr}.csv`;
       
       const seenIds = new Set<string>();
@@ -422,7 +429,7 @@ const App: React.FC = () => {
       });
       
       if (allActiveSignalNames.length === 0) {
-        addDebugLog("EXPORT_ERROR: No decoded signals found for captured messages.");
+        addDebugLog("EXPORT_ERROR: No decoded signals found.");
         if (!isAuto) setIsSavingDecoded(false);
         return;
       }
@@ -467,7 +474,6 @@ const App: React.FC = () => {
       addDebugLog(`${isAuto ? 'AUTO_SAVE' : 'SUCCESS'}: Decoded data exported.`);
     } catch (e: any) {
       addDebugLog("EXPORT_ERROR: " + e.message);
-      console.error(e);
     } finally {
       if (!isAuto) setIsSavingDecoded(false);
     }
@@ -476,7 +482,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (frames.length >= MAX_FRAME_LIMIT && !isAutoSavingRef.current) {
         isAutoSavingRef.current = true;
-        addDebugLog(`AUTO_WATCHER: Buffer limit (1M) reached. Initiating autonomous backup...`);
+        addDebugLog(`AUTO_WATCHER: Buffer limit reached. Saving...`);
         handleSaveTrace(true);
         handleSaveDecodedData(true);
         setFrames([]);
@@ -535,7 +541,7 @@ const App: React.FC = () => {
           <header className="h-14 md:h-16 border-b flex items-center justify-between px-4 md:px-6 bg-white shrink-0 z-[100]">
             <div className="flex items-center gap-3 md:gap-4">
               <button onClick={() => setView('home')} className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={18} /></button>
-              <h2 className="text-[10px] md:text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
+              <h2 className="text-[10px] md:text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_TACTICAL_HUD</h2>
             </div>
             <div className="flex items-center gap-2 md:gap-3">
               <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-300'}`} />
