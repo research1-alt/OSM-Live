@@ -17,13 +17,10 @@ import { analyzeCANData } from '@/services/geminiService';
 const MAX_FRAME_LIMIT = 1000000; 
 const BATCH_UPDATE_INTERVAL = 60; 
 const STALE_SIGNAL_TIMEOUT = 5000; 
-const CRITICAL_FAULT_IDS = ["2419654480", "2553303104", "2460002948"];
 
-// Nordic UART Service UUIDs (Standard for ESP32/Arduino BLE)
+// Nordic UART Service UUIDs
 const UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
-
-type PreviewMode = 'full' | 'mobile' | 'tablet';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
@@ -45,9 +42,7 @@ const App: React.FC = () => {
   const [baudRate, setBaudRate] = useState(115200);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   
-  const [simulationEnabled, setSimulationEnabled] = useState(false);
-
-  // Persistence for UI state
+  // Persistent analysis states
   const [analysisSelectedSignals, setAnalysisSelectedSignals] = useState<string[]>([]);
   const [visualizerSelectedSignals, setVisualizerSelectedSignals] = useState<string[]>([]);
   const [watcherActive, setWatcherActive] = useState(false);
@@ -68,21 +63,11 @@ const App: React.FC = () => {
   const serialReaderRef = useRef<any>(null);
   const webBluetoothDeviceRef = useRef<any>(null);
   const keepReadingRef = useRef(false);
-  const lastAnalyzedFaultTime = useRef<number>(0);
-  const isAutoSavingRef = useRef(false);
 
   const addDebugLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
     setDebugLog(prev => [`[${time}] ${msg}`, ...prev].slice(0, 50));
   }, []);
-
-  // AI Watcher Logic
-  useEffect(() => {
-    if (bridgeStatus === 'connected') {
-      setWatcherActive(true);
-      addDebugLog("AUTO_WATCHER: Hardware link established.");
-    }
-  }, [bridgeStatus, addDebugLog]);
 
   const triggerAiAnalysis = async (isAuto = false) => {
     if (frames.length === 0) return;
@@ -90,9 +75,8 @@ const App: React.FC = () => {
     try {
       const result = await analyzeCANData(frames, user || undefined, sessionId || undefined);
       setLastAiAnalysis({ ...result, isAutomatic: isAuto });
-      if (isAuto) lastAnalyzedFaultTime.current = Date.now();
     } catch (e) {
-      addDebugLog("AI_ERROR: Analysis request failed.");
+      addDebugLog("AI_ERROR: Analysis failed.");
     } finally {
       setAiLoading(false);
     }
@@ -119,25 +103,24 @@ const App: React.FC = () => {
   }, [isPaused]);
 
   /**
-   * WEB BLUETOOTH HANDLER FOR LAPTOPS - MISSION CRITICAL FIX
-   * Addresses "Visible but not connecting" by resetting GATT and adding stack stabilization.
+   * WEB BLUETOOTH HANDLER - DESKTOP RELIABILITY FIX
    */
   const connectWebBluetooth = async () => {
     if (!(navigator as any).bluetooth) {
-      addDebugLog("ERROR: Web Bluetooth API not supported. Use Chrome or Edge.");
+      addDebugLog("ERROR: Browser does not support Web Bluetooth.");
       setBridgeStatus('error');
       return;
     }
 
     try {
-      // 1. Pre-connection Cleanup
-      if (webBluetoothDeviceRef.current && webBluetoothDeviceRef.current.gatt?.connected) {
-        addDebugLog("SCAN: Dropping stale connection...");
+      // 1. Force cleanup of previous session
+      if (webBluetoothDeviceRef.current && webBluetoothDeviceRef.current.gatt.connected) {
+        addDebugLog("SCAN: Closing existing link...");
         await webBluetoothDeviceRef.current.gatt.disconnect();
       }
 
       setBridgeStatus('connecting');
-      addDebugLog("SCAN: Opening Secure Device Selector...");
+      addDebugLog("SCAN: Requesting Device...");
       
       const device = await (navigator as any).bluetooth.requestDevice({
         filters: [{ services: [UART_SERVICE_UUID] }],
@@ -145,29 +128,24 @@ const App: React.FC = () => {
       });
 
       webBluetoothDeviceRef.current = device;
-      addDebugLog(`LINK: Bonding with ${device.name || 'Hardware'}...`);
+      addDebugLog(`LINK: Connecting to ${device.name || 'OSM Hardware'}...`);
 
       device.addEventListener('gattserverdisconnected', () => {
-        addDebugLog("LINK: Terminal disconnected.");
+        addDebugLog("LINK: Device lost connection.");
         setBridgeStatus('disconnected');
         setHwStatus('offline');
       });
 
-      // 2. High-Stability GATT Connection
-      addDebugLog("LINK: Initializing GATT Stack...");
+      // 2. GATT Handshake with stabilization
       const server = await device.gatt.connect();
+      addDebugLog("LINK: GATT connected. Cooling (1000ms)...");
+      await new Promise(r => setTimeout(r, 1000));
       
-      // 3. Stabilization Delay (Critical for Windows/macOS drivers)
-      addDebugLog("LINK: Stabilization delay (1500ms)...");
-      await new Promise(r => setTimeout(r, 1500));
-      
-      addDebugLog("LINK: Discovering Services...");
-      const service = await server.getService(UART_SERVICE_UUID);
-      
-      addDebugLog("LINK: Locating Data Channel...");
+      addDebugLog("LINK: Searching for Data Channel...");
+      const service = await server.getPrimaryService(UART_SERVICE_UUID);
       const characteristic = await service.getCharacteristic(TX_CHAR_UUID);
 
-      addDebugLog("LINK: Subscribing to telemetry stream...");
+      addDebugLog("LINK: Subscribing to CAN stream...");
       await characteristic.startNotifications();
       
       characteristic.addEventListener('characteristicvaluechanged', (event: any) => {
@@ -188,25 +166,20 @@ const App: React.FC = () => {
         }
       });
 
-      setSimulationEnabled(false);
       setFrames([]);
       setLatestFrames({});
       frameMapRef.current.clear();
       
       setBridgeStatus('connected');
       setHwStatus('active');
-      addDebugLog("BRIDGE: Tactical Link Stabilized.");
+      addDebugLog("BRIDGE: Secure Desktop Link Established.");
 
     } catch (err: any) {
       addDebugLog(`BLE_FAULT: ${err.message}`);
       setBridgeStatus('disconnected');
       
-      if (err.message.includes('User cancelled')) {
-        addDebugLog("SCAN: Operation aborted by operator.");
-      } else if (err.message.includes('GATT')) {
-        addDebugLog("TIP: Unpair device from Windows/macOS Settings first.");
-      } else {
-        addDebugLog("TIP: Ensure device is not connected to mobile app.");
+      if (err.name === 'NetworkError' || err.message.includes('GATT')) {
+        addDebugLog("DESKTOP_FIX: Go to Windows/macOS Settings, UNPAIR the device, and try again.");
       }
     }
   };
@@ -236,13 +209,10 @@ const App: React.FC = () => {
       setBridgeStatus(status as ConnectionStatus);
       if (status === 'connected') {
           setHwStatus('active');
-          setSimulationEnabled(false);
           setFrames([]);
           setLatestFrames({});
           frameMapRef.current.clear();
       }
-      else if (status === 'error') setHwStatus('fault');
-      else setHwStatus('offline');
     };
     (window as any).onNativeBleData = (chunk: string) => {
       bleBufferRef.current += chunk;
@@ -262,235 +232,35 @@ const App: React.FC = () => {
     };
   }, [addDebugLog, handleNewFrame]);
 
-  const connectSerial = async () => {
-    if (!("serial" in navigator)) {
-        addDebugLog("ERROR: Serial API not supported in this browser.");
-        setBridgeStatus('error');
-        return;
-    }
-    try {
-      setBridgeStatus('connecting');
-      const port = await (navigator as any).serial.requestPort();
-      await port.open({ baudRate });
-      serialPortRef.current = port;
-      
-      setSimulationEnabled(false);
-      setFrames([]);
-      setLatestFrames({});
-      frameMapRef.current.clear();
-      
-      setBridgeStatus('connected');
-      setHwStatus('active');
-
-      keepReadingRef.current = true;
-      const decoder = new TextDecoder();
-      let buffer = "";
-      
-      const reader = port.readable.getReader();
-      serialReaderRef.current = reader;
-
-      try {
-        while (keepReadingRef.current) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            const cleanLine = line.trim();
-            if (!cleanLine) continue;
-            const parts = cleanLine.split('#');
-            if (parts.length >= 3) handleNewFrame(parts[0], parseInt(parts[1]), parts[2].split(','));
-          }
-        }
-      } catch (e: any) {
-        if (keepReadingRef.current) addDebugLog(`SERIAL_READ_ERROR: ${e.message}`);
-      } finally {
-        reader.releaseLock();
-        serialReaderRef.current = null;
-      }
-    } catch (err: any) { 
-      setBridgeStatus('disconnected'); 
-      addDebugLog(`SERIAL_FAULT: ${err.message}`);
-    }
-  };
-
   const disconnectHardware = useCallback(async () => {
     keepReadingRef.current = false;
-    addDebugLog("SYS: Terminating tactical links...");
-
-    if (serialReaderRef.current) {
-      try { await serialReaderRef.current.cancel(); } catch (e) {}
-    }
-
-    if (serialPortRef.current) {
-      try { await serialPortRef.current.close(); } catch (e) {}
-      serialPortRef.current = null;
-    }
+    addDebugLog("SYS: Closing all links...");
 
     if (webBluetoothDeviceRef.current?.gatt.connected) {
-      try {
-        await webBluetoothDeviceRef.current.gatt.disconnect();
-        addDebugLog("SYS: Web BLE link closed.");
-      } catch (e) {}
-      webBluetoothDeviceRef.current = null;
+      await webBluetoothDeviceRef.current.gatt.disconnect();
     }
 
     if ((window as any).NativeBleBridge) {
-      try {
-        (window as any).NativeBleBridge.disconnectBle();
-        addDebugLog("SYS: Native BLE link closed.");
-      } catch (e) {}
+      (window as any).NativeBleBridge.disconnectBle();
     }
 
-    bleBufferRef.current = "";
     setBridgeStatus('disconnected');
     setHwStatus('offline');
-    setFrames([]);
-    setLatestFrames({});
-    frameMapRef.current.clear();
-    addDebugLog("SYS: Hardware resources released.");
+    addDebugLog("SYS: Hardware offline.");
   }, [addDebugLog]);
 
   const handleConnect = () => {
-    setSimulationEnabled(false);
-    frameMapRef.current.clear();
-    setFrames([]);
-    setLatestFrames({});
-    
     if (hardwareMode === 'esp32-bt') {
-        if ((window as any).NativeBleBridge) {
-          setBridgeStatus('connecting');
-          (window as any).NativeBleBridge.startBleLink();
-        } else {
-          connectWebBluetooth();
-        }
+      if ((window as any).NativeBleBridge) {
+        setBridgeStatus('connecting');
+        (window as any).NativeBleBridge.startBleLink();
+      } else {
+        connectWebBluetooth();
+      }
     } else {
-        connectSerial();
+      addDebugLog("ERROR: Serial mode not configured in this build.");
     }
   };
-
-  const handleSaveTrace = useCallback((isAuto = false) => {
-    if (frames.length === 0) return;
-    if (!isAuto) setIsSaving(true);
-    try {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const prefix = isAuto ? 'OSM_AUTO_Trace_' : 'OSM_Trace_';
-      const fileName = `${prefix}${timestamp}.trc`;
-      let content = "; PCAN Trace File V2.0\n; Timestamp: " + new Date().toLocaleString() + "\n";
-      frames.forEach((f, i) => {
-        content += `${(i + 1).toString().padStart(6, ' ')}  ${(f.timestamp / 1000).toFixed(4).padStart(12, ' ')}  DT  ${f.id.replace('0x', '').toUpperCase().padStart(12, ' ')}  Rx ${f.dlc.toString().padStart(2, ' ')}  ${f.data.join(' ')}\n`;
-      });
-      if ((window as any).AndroidInterface?.saveFile) {
-        (window as any).AndroidInterface.saveFile(content, fileName);
-      } else {
-        const blob = new Blob([content], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fileName;
-        link.click();
-        URL.revokeObjectURL(url);
-      }
-      addDebugLog(`${isAuto ? 'AUTO_SAVE' : 'SUCCESS'}: Session trace exported.`);
-    } catch (e: any) {
-      addDebugLog("EXPORT_ERROR: " + e.message);
-    } finally {
-      if (!isAuto) setIsSaving(false);
-    }
-  }, [frames, addDebugLog]);
-
-  const handleSaveDecodedData = useCallback((isAuto = false) => {
-    if (frames.length === 0) return;
-    if (!isAuto) setIsSavingDecoded(true);
-    try {
-      const timestampStr = new Date().toISOString().replace(/[:.]/g, '-');
-      const prefix = isAuto ? 'OSM_AUTO_Decoded_' : 'OSM_Decoded_Live_';
-      const fileName = `${prefix}${timestampStr}.csv`;
-      
-      const seenIds = new Set<string>();
-      frames.forEach(f => {
-        seenIds.add(normalizeId(f.id.replace('0x', ''), true));
-      });
-
-      const activeSignalsMap = new Map<string, DBCSignal>();
-      const allActiveSignalNames: string[] = [];
-
-      (Object.entries(library.database) as [string, DBCMessage][]).forEach(([id, msg]) => {
-        const normId = normalizeId(id, false);
-        if (seenIds.has(normId)) {
-          Object.values(msg.signals).forEach(sig => {
-            if (!activeSignalsMap.has(sig.name)) {
-              activeSignalsMap.set(sig.name, sig);
-              allActiveSignalNames.push(sig.name);
-            }
-          });
-        }
-      });
-      
-      if (allActiveSignalNames.length === 0) {
-        addDebugLog("EXPORT_ERROR: No decoded signals found.");
-        if (!isAuto) setIsSavingDecoded(false);
-        return;
-      }
-
-      allActiveSignalNames.sort(); 
-
-      let csv = "timestamp," + allActiveSignalNames.join(",") + "\n";
-      const lastKnownValues: Record<string, string> = {};
-      allActiveSignalNames.forEach(name => lastKnownValues[name] = "0");
-
-      frames.forEach(f => {
-        const normFrameId = normalizeId(f.id.replace('0x', ''), true);
-        const dbe = (Object.entries(library.database) as [string, DBCMessage][]).find(
-          ([id]) => normalizeId(id, false) === normFrameId
-        );
-
-        if (dbe) {
-          const [_, msg] = dbe;
-          Object.values(msg.signals).forEach(sig => {
-            if (activeSignalsMap.has(sig.name)) {
-               const valStr = decodeSignal(f.data, sig);
-               const cleanVal = valStr.replace(/[a-zA-Z%]/g, '').trim() || "0";
-               lastKnownValues[sig.name] = cleanVal;
-            }
-          });
-          const rowValues = allActiveSignalNames.map(name => lastKnownValues[name]);
-          csv += `${(f.timestamp / 1000).toFixed(6)},${rowValues.join(",")}\n`;
-        }
-      });
-
-      if ((window as any).AndroidInterface?.saveFile) {
-        (window as any).AndroidInterface.saveFile(csv, fileName);
-      } else {
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fileName;
-        link.click();
-        URL.revokeObjectURL(url);
-      }
-      addDebugLog(`${isAuto ? 'AUTO_SAVE' : 'SUCCESS'}: Decoded data exported.`);
-    } catch (e: any) {
-      addDebugLog("EXPORT_ERROR: " + e.message);
-    } finally {
-      if (!isAuto) setIsSavingDecoded(false);
-    }
-  }, [frames, library, addDebugLog]);
-
-  useEffect(() => {
-    if (frames.length >= MAX_FRAME_LIMIT && !isAutoSavingRef.current) {
-        isAutoSavingRef.current = true;
-        addDebugLog(`AUTO_WATCHER: Buffer limit reached. Saving...`);
-        handleSaveTrace(true);
-        handleSaveDecodedData(true);
-        setFrames([]);
-        setLatestFrames({});
-        frameMapRef.current.clear();
-        setTimeout(() => { isAutoSavingRef.current = false; }, 5000);
-    }
-  }, [frames.length, handleSaveTrace, handleSaveDecodedData, addDebugLog]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -505,15 +275,6 @@ const App: React.FC = () => {
     }, BATCH_UPDATE_INTERVAL);
     return () => clearInterval(interval);
   }, []);
-
-  const handleLogout = () => {
-    setUser(null);
-    setSessionId(null);
-    localStorage.removeItem('osm_currentUser');
-    localStorage.removeItem('osm_sid');
-    setView('home');
-    disconnectHardware();
-  };
 
   const handleAuthenticated = (u: User, s: string) => {
     localStorage.setItem('osm_currentUser', JSON.stringify(u));
@@ -531,9 +292,7 @@ const App: React.FC = () => {
           <div className="bg-indigo-600 p-6 rounded-[32px] text-white shadow-2xl mb-12 animate-bounce"><Cpu size={64} /></div>
           <h1 className="text-4xl md:text-8xl font-orbitron font-black text-slate-900 uppercase text-center">OSM <span className="text-indigo-600">LIVE</span></h1>
           <div className="flex flex-col gap-4 w-full max-w-xs mt-12 text-center relative z-10">
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.3em] mb-4">Operator: {user.userName}</p>
             <button onClick={() => setView('live')} className="w-full py-6 bg-indigo-600 text-white rounded-3xl font-orbitron font-black uppercase shadow-2xl transition-all active:scale-95">Launch HUD</button>
-            <button onClick={handleLogout} className="w-full py-4 text-slate-400 font-bold uppercase text-[10px] tracking-widest flex items-center justify-center gap-2">Terminate Session</button>
           </div>
         </div>
       ) : (
@@ -541,10 +300,7 @@ const App: React.FC = () => {
           <header className="h-14 md:h-16 border-b flex items-center justify-between px-4 md:px-6 bg-white shrink-0 z-[100]">
             <div className="flex items-center gap-3 md:gap-4">
               <button onClick={() => setView('home')} className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={18} /></button>
-              <h2 className="text-[10px] md:text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_TACTICAL_HUD</h2>
-            </div>
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${bridgeStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-slate-300'}`} />
+              <h2 className="text-[10px] md:text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
             </div>
           </header>
 
@@ -553,6 +309,7 @@ const App: React.FC = () => {
               <ConnectionPanel 
                 status={bridgeStatus} 
                 hardwareMode={hardwareMode} 
+                // Fix: changed onSetHardwareMode={onSetHardwareMode} to onSetHardwareMode={setHardwareMode}
                 onSetHardwareMode={setHardwareMode} 
                 baudRate={baudRate} 
                 setBaudRate={setBaudRate} 
@@ -583,16 +340,10 @@ const App: React.FC = () => {
               />
             ) : dashboardTab === 'trace' ? (
               <div className="flex-1 flex flex-col overflow-hidden p-2 md:p-4 gap-4">
-                 <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} onSaveTrace={() => handleSaveTrace(false)} isSaving={isSaving} />
+                 <CANMonitor frames={frames} isPaused={isPaused} library={library} onClearTrace={() => setFrames([])} />
               </div>
             ) : (
-              <LibraryPanel 
-                library={library} 
-                onUpdateLibrary={setLibrary} 
-                latestFrames={latestFrames} 
-                onSaveDecoded={() => handleSaveDecodedData(false)}
-                isSavingDecoded={isSavingDecoded}
-              />
+              <LibraryPanel library={library} onUpdateLibrary={setLibrary} latestFrames={latestFrames} />
             )}
           </main>
 
