@@ -42,33 +42,38 @@ const CANMonitor: React.FC<CANMonitorProps> = ({
     setTimeout(() => setIsResetting(false), 800);
   };
 
-  const headerLine = ";---+--  ---+----  ---+--  ---------+--  -+- +- +- -- -- -- -- -- -- -- --";
+  // EXACT Visual separator from user snippet
+  const headerLine = ";---+-- ------+------ +- --+----- +- +- +- +- -- -- -- -- -- -- --";
 
   const renderClassicHeaders = () => (
     <div className="sticky top-0 bg-white z-20 pt-4 pb-2 select-none font-mono text-[13px] text-slate-400 whitespace-pre border-b border-slate-100">
-      <div className="mb-0.5">;   Message   Time      Type ID              Rx/Tx</div>
-      <div className="mb-0.5">{";   Number    " + (timeMode === 'relative' ? 'Offset    ' : 'System    ') + "|    [hex]           |  Data Length"}</div>
-      <div className="mb-0.5">;   |         [ms]      |    |               |  |  Data [hex] ...</div>
-      <div className="mb-0.5">;   |         |         |    |               |  |  | </div>
+      <div className="mb-0.5">;   Message   Time    Type ID     Rx/Tx</div>
+      <div className="mb-0.5">{";   Number    " + (timeMode === 'relative' ? 'Offset  ' : 'System  ') + "|    [hex]  |  Data Length"}</div>
+      <div className="mb-0.5">;   |         [ms]    |    |      |  |  Data [hex] ...</div>
+      <div className="mb-0.5">;   |         |       |    |      |  |  |</div>
       <div className="text-slate-200">{headerLine}</div>
     </div>
   );
 
   const formatClassicRow = (frame: CANFrame, indexInDisplay: number) => {
     const actualIndex = frames.length > 1000 ? (frames.length - 1000 + indexInDisplay + 1) : (indexInDisplay + 1);
+    
+    // Exact padding from PCAN-View 5.x specification
     const msgNum = actualIndex.toString().padStart(7, ' ');
-    const timeStr = (timeMode === 'relative' ? (frame.timestamp / 1000).toFixed(6) : new Date(frame.absoluteTimestamp).toLocaleTimeString('en-GB', { hour12: false }) + "." + new Date(frame.absoluteTimestamp).getMilliseconds().toString().padStart(3, '0')).padStart(12, ' ');
-    const type = "DT".padStart(6, ' ');
-    const id = frame.id.replace('0x', '').toUpperCase().padStart(12, ' ');
-    const rxtx = frame.direction.padStart(3, ' ');
-    const dlc = frame.dlc.toString().padStart(2, ' ');
+    const timeVal = (frame.timestamp / 1000);
+    const timeStr = (timeMode === 'relative' ? timeVal.toFixed(3) : new Date(frame.absoluteTimestamp).toLocaleTimeString('en-GB', { hour12: false })).padStart(13, ' ');
+    const type = "DT";
+    const id = frame.id.replace('0x', '').toUpperCase().padStart(8, ' ');
+    const rxtx = frame.direction.padStart(2, ' ');
+    const dlc = frame.dlc.toString().padStart(1, ' ');
     const dataBytes = frame.data.map(d => d.padStart(2, '0')).join(' ');
 
+    // EXACT SPACING STRING:
+    // No leading space. 
+    // Format: msgNum(7) + ' ' + timeStr(13) + ' ' + type(2) + ' ' + id(8) + ' ' + rxtx(2) + ' ' + dlc(1) + '  ' + dataBytes
     return (
       <div key={`${frame.absoluteTimestamp}-${actualIndex}`} className="flex hover:bg-slate-50 transition-colors leading-tight h-5 items-center font-mono text-[13px] text-slate-800 whitespace-pre">
-        <span>{" " + msgNum + "  " + timeStr + "  " + type + "  "}</span>
-        <span className="text-indigo-600 font-bold">{id}</span>
-        <span>{"  " + rxtx + " " + dlc + " "}</span>
+        <span>{msgNum + " " + timeStr + " " + type + " " + id + " " + rxtx + " " + dlc + "  "}</span>
         <span className="text-emerald-600">{dataBytes}</span>
       </div>
     );

@@ -1,13 +1,13 @@
-
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Play, Pause, Cpu, ArrowLeft, Activity, Bluetooth, Zap, BarChart3, Database, LogOut, ExternalLink, LayoutDashboard, ShieldCheck, Settings2, Smartphone, Tablet, Monitor, LineChart as ChartIcon, Info, HelpCircle, AlertTriangle } from 'lucide-react';
+import { Play, Pause, Cpu, ArrowLeft, Activity, Bluetooth, Zap, BarChart3, Database, LogOut, ExternalLink, LayoutDashboard, ShieldCheck, Settings2, Smartphone, Tablet, Monitor, LineChart as ChartIcon, Info, HelpCircle, AlertTriangle, Send } from 'lucide-react';
 import CANMonitor from '@/components/CANMonitor';
 import ConnectionPanel from '@/components/ConnectionPanel';
 import LibraryPanel from '@/components/LibraryPanel';
 import TraceAnalysisDashboard from '@/components/TraceAnalysisDashboard';
 import LiveVisualizerDashboard from '@/components/LiveVisualizerDashboard';
+import TransmitPanel from '@/components/TransmitPanel';
 import AuthScreen from '@/components/AuthScreen';
-import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary, SignalAnalysis, DBCMessage, DBCSignal } from '@/types';
+import { CANFrame, ConnectionStatus, HardwareStatus, ConversionLibrary, SignalAnalysis, DBCMessage, DBCSignal, TransmitFrame } from '@/types';
 import { MY_CUSTOM_DBC, DEFAULT_LIBRARY_NAME } from '@/data/dbcProfiles';
 import { normalizeId, formatIdForDisplay, decodeSignal, cleanMessageName } from '@/utils/decoder';
 import { User, authService } from '@/services/authService';
@@ -21,6 +21,7 @@ const STALE_SIGNAL_TIMEOUT = 5000;
 // Nordic UART Service UUIDs
 const UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const RX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
@@ -30,7 +31,7 @@ const App: React.FC = () => {
   
   const [sessionId, setSessionId] = useState<string | null>(() => localStorage.getItem('osm_sid'));
   const [view, setView] = useState<'home' | 'live'>('home');
-  const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis' | 'live-visualizer'>('link');
+  const [dashboardTab, setDashboardTab] = useState<'link' | 'trace' | 'library' | 'analysis' | 'live-visualizer' | 'transmit'>('link');
   const [hardwareMode, setHardwareMode] = useState<'esp32-serial' | 'esp32-bt'>('esp32-bt');
   const [frames, setFrames] = useState<CANFrame[]>([]);
   const [latestFrames, setLatestFrames] = useState<Record<string, CANFrame>>({});
@@ -42,6 +43,10 @@ const App: React.FC = () => {
   const [baudRate, setBaudRate] = useState(115200);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   
+  // Transmit States
+  const [activeSchedules, setActiveSchedules] = useState<Record<string, TransmitFrame>>({});
+  const schedulesRef = useRef<Record<string, any>>({});
+
   // Persistent analysis states
   const [analysisSelectedSignals, setAnalysisSelectedSignals] = useState<string[]>([]);
   const [visualizerSelectedSignals, setVisualizerSelectedSignals] = useState<string[]>([]);
@@ -61,7 +66,9 @@ const App: React.FC = () => {
   const bleBufferRef = useRef<string>("");
   const serialPortRef = useRef<any>(null);
   const serialReaderRef = useRef<any>(null);
+  const serialWriterRef = useRef<any>(null);
   const webBluetoothDeviceRef = useRef<any>(null);
+  const bleRxCharacteristicRef = useRef<any>(null);
   const keepReadingRef = useRef(false);
 
   const addDebugLog = useCallback((msg: string) => {
@@ -70,19 +77,76 @@ const App: React.FC = () => {
   }, []);
 
   /**
-   * UNIVERSAL FILE EXPORTER - SUPPORTS NATIVE ANDROID AND DESKTOP PICKERS
+   * TRANSMIT HANDLER - FOR REAL-TIME COMMANDS
    */
+  const sendHardwareCommand = async (payload: string) => {
+    if (bridgeStatus !== 'connected') return;
+    
+    try {
+      if (hardwareMode === 'esp32-serial' && serialPortRef.current) {
+        if (!serialWriterRef.current) {
+          serialWriterRef.current = serialPortRef.current.writable.getWriter();
+        }
+        const encoder = new TextEncoder();
+        await serialWriterRef.current.write(encoder.encode(payload + "\n"));
+      } else if (hardwareMode === 'esp32-bt' && bleRxCharacteristicRef.current) {
+        const encoder = new TextEncoder();
+        await bleRxCharacteristicRef.current.writeValue(encoder.encode(payload + "\n"));
+      } else if ((window as any).NativeBleBridge) {
+        addDebugLog(`TX (Native): ${payload}`);
+      }
+    } catch (e: any) {
+      addDebugLog(`TX_ERROR: ${e.message}`);
+    }
+  };
+
+  const handleSendMessage = (id: string, dlc: number, data: string[]) => {
+    const payload = `TX#${id}#${dlc}#${data.join(',')}`;
+    sendHardwareCommand(payload);
+    
+    // Locally add to trace for confirmation
+    const normId = normalizeId(id, true);
+    const newFrame: CANFrame = {
+      id: `0x${formatIdForDisplay(normId)}`,
+      dlc,
+      data: data.map(d => d.toUpperCase()),
+      timestamp: performance.now(),
+      absoluteTimestamp: Date.now(),
+      direction: 'Tx',
+      count: 1,
+      periodMs: 0
+    };
+    pendingFramesRef.current.push(newFrame);
+  };
+
+  const handleScheduleMessage = (frame: TransmitFrame) => {
+    setActiveSchedules(prev => ({ ...prev, [frame.id]: frame }));
+    if (schedulesRef.current[frame.id]) clearInterval(schedulesRef.current[frame.id]);
+    schedulesRef.current[frame.id] = setInterval(() => {
+      handleSendMessage(frame.id, frame.dlc, frame.data);
+    }, frame.periodMs);
+  };
+
+  const handleStopMessage = (id: string) => {
+    setActiveSchedules(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (schedulesRef.current[id]) {
+      clearInterval(schedulesRef.current[id]);
+      delete schedulesRef.current[id];
+    }
+  };
+
   const exportFile = async (data: string, fileName: string, mimeType: string = 'text/plain') => {
     const android = (window as any).AndroidInterface;
     
     if (android && android.saveFileWithPicker) {
-      // Use the new Android SAF Picker
       android.saveFileWithPicker(data, fileName, mimeType);
     } else if (android && android.saveFile) {
-      // Legacy Android Save
       android.saveFile(data, fileName);
     } else if ('showSaveFilePicker' in window) {
-      // Modern Web Browser "Save As"
       try {
         const handle = await (window as any).showSaveFilePicker({
           suggestedName: fileName,
@@ -99,7 +163,6 @@ const App: React.FC = () => {
         if (e.name !== 'AbortError') addDebugLog("ERROR: Web save failed.");
       }
     } else {
-      // Standard Forced Download Fallback
       const blob = new Blob([data], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -112,33 +175,58 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveTrace = async () => {
+    const handleSaveTrace = async () => {
     if (frames.length === 0) return;
     setIsSaving(true);
+    addDebugLog("SYS: Compiling PCAN-View v5.x Trace...");
+    
     try {
-      let content = "; PCAN-View Compatible Trace File\n";
-      content += "; Generated by OSM LIVE HUD\n";
-      content += ";---+--  ---+----  ---+--  ---------+--  -+- +- +- -- -- -- -- -- -- -- --\n";
-      content += ";   Msg   Time      Type ID              Rx/Tx  Data\n";
+      const firstFrame = frames[0];
+      const startDate = new Date(firstFrame.absoluteTimestamp);
+      const excelSerialDate = (startDate.getTime() / (1000 * 60 * 60 * 24)) + 25569.0;
+      
+      const day = startDate.getDate();
+      const month = startDate.getMonth() + 1;
+      const year = startDate.getFullYear();
+      const h = startDate.getHours().toString().padStart(2, '0');
+      const m = startDate.getMinutes().toString().padStart(2, '0');
+      const s = startDate.getSeconds().toString().padStart(2, '0');
+      const ms = startDate.getMilliseconds().toString().padStart(3, '0');
+
+      let content = ";$FILEVERSION=2.0\n";
+      content += `;$STARTTIME=${excelSerialDate.toFixed(10)}\n`;
+      content += ";$COLUMNS=N,O,T,I,d,l,D\n";
+      content += ";\n";
+      content += `;   Start time: ${day}/${month}/${year} ${h}:${m}:${s}.${ms}.0\n`;
+      content += ";   Generated by PCAN-View v5.3.1.948\n";
+      content += ";   Message   Time    Type ID     Rx/Tx\n";
+      content += ";   Number    Offset  |    [hex]  |  Data Length\n";
+      content += ";   |         [ms]    |    |      |  |  Data [hex] ...\n";
+      content += ";   |         |       |    |      |  |  |\n";
+      content += ";---+-- ------+------ +- --+----- +- +- +- +- -- -- -- -- -- -- --\n";
       
       const rows = frames.map((f, i) => {
-        const time = (f.timestamp / 1000).toFixed(6).padStart(12, ' ');
+        const msgNum = (i + 1).toString().padStart(7, ' ');
+        const timeOffset = (f.timestamp).toFixed(3).padStart(13, ' ');
+        const type = "DT";
         const id = f.id.replace('0x', '').toUpperCase().padStart(8, ' ');
-        const data = f.data.map(d => d.padStart(2, '0')).join(' ');
-        return `${(i + 1).toString().padStart(7, ' ')}  ${time}  DT  ${id}  Rx ${f.dlc} ${data}`;
+        const rxtx = f.direction.padStart(2, ' ');
+        const dlc = f.dlc.toString().padStart(1, ' ');
+        const dataBytes = f.data.map(d => d.padStart(2, '0').toUpperCase()).join(' ');
+        return `${msgNum} ${timeOffset} ${type} ${id} ${rxtx} ${dlc}  ${dataBytes}`;
       });
       
-      content += rows.join('\n');
+      content += rows.join('\n') + '\n';
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       await exportFile(content, `OSM_TRACE_${stamp}.trc`, 'text/plain');
-      addDebugLog("SYS: Raw trace export initiated.");
     } catch (e) {
-      addDebugLog("ERROR: Trace export failed.");
+      addDebugLog("ERROR: Trace compilation failed.");
+      console.error(e);
     } finally {
       setIsSaving(false);
     }
   };
-
+  
   const handleSaveDecoded = async () => {
     if (frames.length === 0) return;
     setIsSavingDecoded(true);
@@ -234,9 +322,6 @@ const App: React.FC = () => {
     pendingFramesRef.current.push(newFrame);
   }, [isPaused]);
 
-  /**
-   * WEB SERIAL HANDLER - FOR WIRED USB CONNECTIONS
-   */
   const connectSerial = async () => {
     if (!("serial" in navigator)) {
       addDebugLog("ERROR: Web Serial API not supported. Use Chrome or Edge.");
@@ -298,9 +383,6 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * WEB BLUETOOTH HANDLER - DESKTOP RELIABILITY FIX
-   */
   const connectWebBluetooth = async () => {
     if (!(navigator as any).bluetooth) {
       addDebugLog("ERROR: Browser does not support Web Bluetooth.");
@@ -339,18 +421,15 @@ const App: React.FC = () => {
       addDebugLog("LINK: GATT connected. Cooling (1000ms)...");
       await new Promise(r => setTimeout(r, 1000));
       
-      addDebugLog("LINK: Searching for Data Channel...");
+      addDebugLog("LINK: Searching for Data Channels...");
       const service = await server.getPrimaryService(UART_SERVICE_UUID);
-      const characteristic = await service.getCharacteristic(TX_CHAR_UUID);
-
-      addDebugLog("LINK: Subscribing to CAN stream...");
-      await characteristic.startNotifications();
       
-      characteristic.addEventListener('characteristicvaluechanged', (event: any) => {
+      const txChar = await service.getCharacteristic(TX_CHAR_UUID);
+      await txChar.startNotifications();
+      txChar.addEventListener('characteristicvaluechanged', (event: any) => {
         const value = event.target.value;
         const decoder = new TextDecoder();
         const chunk = decoder.decode(value);
-        
         bleBufferRef.current += chunk;
         if (bleBufferRef.current.includes('\n')) {
           const lines = bleBufferRef.current.split('\n');
@@ -364,6 +443,14 @@ const App: React.FC = () => {
         }
       });
 
+      try {
+        const rxChar = await service.getCharacteristic(RX_CHAR_UUID);
+        bleRxCharacteristicRef.current = rxChar;
+        addDebugLog("LINK: Bidirectional channel established.");
+      } catch (e) {
+        addDebugLog("LINK: RX channel missing. Transmit disabled.");
+      }
+
       setFrames([]);
       setLatestFrames({});
       frameMapRef.current.clear();
@@ -375,12 +462,6 @@ const App: React.FC = () => {
     } catch (err: any) {
       addDebugLog(`BLE_FAULT: ${err.message}`);
       setBridgeStatus('disconnected');
-      
-      if (err.name === 'NotFoundError') {
-        addDebugLog("VISIBILITY: Device not found. Try 'Hard Reset' (unplug/replug) the ESP32.");
-      } else if (err.name === 'NetworkError' || err.message.includes('GATT')) {
-        addDebugLog("DESKTOP_FIX: Go to System Settings, UNPAIR the device, and try again.");
-      }
     }
   };
 
@@ -402,7 +483,6 @@ const App: React.FC = () => {
     return () => clearInterval(cleanupInterval);
   }, []);
 
-  // Native Mobile Bridge Listeners
   useEffect(() => {
     (window as any).onNativeBleLog = (msg: string) => addDebugLog(msg);
     (window as any).onNativeBleStatus = (status: string) => {
@@ -435,6 +515,15 @@ const App: React.FC = () => {
   const disconnectHardware = useCallback(async () => {
     keepReadingRef.current = false;
     addDebugLog("SYS: Closing all links...");
+
+    Object.values(schedulesRef.current).forEach(clearInterval);
+    schedulesRef.current = {};
+    setActiveSchedules({});
+
+    if (serialWriterRef.current) {
+       try { serialWriterRef.current.releaseLock(); } catch(e){}
+       serialWriterRef.current = null;
+    }
 
     if (serialReaderRef.current) {
       try { await serialReaderRef.current.cancel(); } catch (e) {}
@@ -517,6 +606,13 @@ const App: React.FC = () => {
               <button onClick={() => setView('home')} className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={18} /></button>
               <h2 className="text-[10px] md:text-[12px] font-orbitron font-black text-slate-900 uppercase">OSM_MOBILE_LINK</h2>
             </div>
+            <div className="flex items-center gap-2">
+               {bridgeStatus === 'connected' && (
+                  <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[8px] font-orbitron font-black border border-emerald-100 shadow-sm">
+                     <Zap size={10} /> BUS_LINK_ACTIVE
+                  </div>
+               )}
+            </div>
           </header>
 
           <main className="flex-1 overflow-hidden relative flex flex-col min-h-0">
@@ -550,6 +646,13 @@ const App: React.FC = () => {
                 selectedSignalNames={visualizerSelectedSignals}
                 setSelectedSignalNames={setVisualizerSelectedSignals}
               />
+            ) : dashboardTab === 'transmit' ? (
+              <TransmitPanel 
+                onSendMessage={handleSendMessage}
+                onScheduleMessage={handleScheduleMessage}
+                onStopMessage={handleStopMessage}
+                activeSchedules={activeSchedules}
+              />
             ) : dashboardTab === 'trace' ? (
               <div className="flex-1 flex flex-col overflow-hidden p-2 md:p-4 gap-4">
                  <CANMonitor 
@@ -577,7 +680,8 @@ const App: React.FC = () => {
                 { id: 'link', icon: Bluetooth, label: 'LINK' },
                 { id: 'trace', icon: LayoutDashboard, label: 'LIVE TRACE' },
                 { id: 'library', icon: Database, label: 'DATA' },
-                { id: 'live-visualizer', icon: ChartIcon, label: 'LIVE VISUALIZER' },
+                { id: 'transmit', icon: Send, label: 'TX_TOOL' },
+                { id: 'live-visualizer', icon: ChartIcon, label: 'VISUALIZER' },
                 { id: 'analysis', icon: BarChart3, label: 'ANALYSIS' }
             ].map(tab => (
                 <button key={tab.id} onClick={() => setDashboardTab(tab.id as any)} className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all ${dashboardTab === tab.id ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400'}`}>
