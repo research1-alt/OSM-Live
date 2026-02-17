@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { CANFrame, ConversionLibrary, DBCMessage, DBCSignal, SignalAnalysis } from '../types.ts';
 import { normalizeId, decodeSignal, cleanMessageName } from '../utils/decoder.ts';
@@ -14,7 +15,6 @@ interface TraceAnalysisDashboardProps {
   setWatcherActive: React.Dispatch<React.SetStateAction<boolean>>;
   lastAiAnalysis: (SignalAnalysis & { isAutomatic?: boolean }) | null;
   aiLoading: boolean;
-  // Fix: changed from 'void' to '() => void' to correctly type the analysis trigger function
   onManualAnalyze: () => void;
 }
 
@@ -35,7 +35,7 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<'stats' | 'ai'>('stats');
   const [searchTerm, setSearchTerm] = useState('');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const plotData = useMemo(() => {
     const signalMap = new Map<string, { msg: DBCMessage; signals: DBCSignal[] }>();
@@ -161,27 +161,22 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
 
   return (
     <div className="flex h-full w-full bg-white overflow-hidden relative">
-      {/* Mobile Backdrop */}
       {isSidebarOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[150] lg:hidden" onClick={() => setIsSidebarOpen(false)} />
       )}
 
-      {/* Pinned/Overlay Sidebar */}
       <aside className={`
-        fixed lg:static inset-y-0 left-0 z-[160] w-72 lg:w-80 bg-slate-50 border-r border-slate-200 transform transition-all duration-300 ease-in-out
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:-ml-80 lg:opacity-0'}
+        fixed lg:static inset-y-0 left-0 z-[160] w-72 lg:w-80 bg-slate-50 border-r border-slate-200 transform transition-transform duration-300 ease-in-out
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
         {sidebarContent}
       </aside>
 
-      <div className="flex-1 flex flex-col bg-white overflow-hidden p-3 md:p-8 transition-all duration-300">
+      <div className="flex-1 flex flex-col bg-white overflow-hidden p-3 md:p-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 md:mb-6 shrink-0 gap-3">
           <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
-              className={`p-1.5 rounded-lg shadow-lg hover:scale-105 transition-all active:scale-95 ${isSidebarOpen ? 'bg-slate-100 text-slate-600' : 'bg-indigo-600 text-white'}`}
-            >
-              {isSidebarOpen ? <X size={18} /> : <Menu size={18} />}
+            <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden p-1.5 bg-indigo-600 text-white rounded-lg shadow-lg">
+              <Menu size={18} />
             </button>
             <div>
               <h2 className="text-lg md:text-2xl font-orbitron font-black text-slate-900 uppercase tracking-tight">LIVE_ANALYSIS</h2>
@@ -199,7 +194,7 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar no-scrollbar transition-all duration-300">
+        <div className="flex-1 overflow-y-auto custom-scrollbar no-scrollbar">
           {viewMode === 'ai' ? (
             <div className="h-full max-w-4xl mx-auto">
               <AIDiagnostics 
@@ -218,9 +213,7 @@ const TraceAnalysisDashboard: React.FC<TraceAnalysisDashboardProps> = ({
                   <BarChart3 size={40} className="mb-4 text-indigo-200" />
                   <h4 className="text-[9px] font-orbitron font-black uppercase tracking-[0.4em]">Matrix_Idle</h4>
                   <p className="text-[7px] font-bold uppercase mt-2 max-w-xs px-6">Select signals from the matrix to begin computation</p>
-                  {!isSidebarOpen && (
-                    <button onClick={() => setIsSidebarOpen(true)} className="mt-6 px-5 py-2.5 bg-indigo-600 text-white rounded-lg text-[8px] font-orbitron font-black uppercase shadow-lg">Open Matrix</button>
-                  )}
+                  <button onClick={() => setIsSidebarOpen(true)} className="mt-6 lg:hidden px-5 py-2.5 bg-indigo-600 text-white rounded-lg text-[8px] font-orbitron font-black uppercase">Open Matrix</button>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-6 pb-20">

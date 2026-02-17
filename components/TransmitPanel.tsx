@@ -118,15 +118,13 @@ const TransmitPanel: React.FC<TransmitPanelProps> = ({
             <Info size={14} className="text-indigo-400" /> Active_Schedules
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Fix: Explicitly cast Object.values to TransmitFrame[] to ensure correct type inference for length check */}
-            {(Object.values(activeSchedules) as TransmitFrame[]).length === 0 ? (
+            {Object.values(activeSchedules).length === 0 ? (
               <div className="col-span-full py-12 border-2 border-dashed border-slate-100 rounded-[32px] flex flex-col items-center justify-center opacity-30">
                 <Square size={32} className="mb-2 text-slate-300" />
                 <span className="text-[10px] font-orbitron font-black uppercase tracking-widest">No Active Periodic Messages</span>
               </div>
             ) : (
-              /* Fix: Explicitly cast Object.values to TransmitFrame[] to ensure 'frame' is correctly typed as TransmitFrame instead of unknown */
-              (Object.values(activeSchedules) as TransmitFrame[]).map(frame => (
+              Object.values(activeSchedules).map(frame => (
                 <div key={frame.id} className="bg-white border border-indigo-100 rounded-3xl p-6 shadow-md flex items-center justify-between animate-in slide-in-from-bottom-2">
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-3">

@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,8 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>OSM Live | Tactical Mobile HUD</title>
     
-    <!-- PWA & Manifest -->
-    <link rel="manifest" href="/manifest.webmanifest">
+    <!-- PWA & Mobile Optimization -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="OSM HUD">
@@ -27,28 +27,20 @@
         * {
             -webkit-tap-highlight-color: transparent;
             user-select: none;
-            box-sizing: border-box;
         }
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
+        body {
+            font-family: 'Inter', sans-serif;
             background-color: #ffffff;
             color: #0f172a;
             overflow: hidden;
+            height: 100vh;
             width: 100vw;
-            position: fixed;
-            overscroll-behavior: none;
-        }
-        #root {
-            height: 100dvh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+            position: fixed; /* Prevent pull-to-refresh */
         }
         .font-orbitron { font-family: 'Orbitron', sans-serif; }
         .mono { font-family: 'JetBrains Mono', monospace; }
         
+        /* Tactical Grid Background */
         .cyber-grid {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -59,15 +51,18 @@
             z-index: -1;
         }
 
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(79, 70, 229, 0.1);
+        }
+
         /* Responsive Safe Areas */
         .safe-pb { padding-bottom: env(safe-area-inset-bottom); }
         .safe-pt { padding-top: env(safe-area-inset-top); }
 
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-thumb { background: rgba(79, 70, 229, 0.3); border-radius: 10px; }
-        
-        .min-h-0 { min-height: 0; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
     </style>
 <script type="importmap">
 {
