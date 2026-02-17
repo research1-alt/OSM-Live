@@ -38,12 +38,13 @@
             overflow: hidden;
             width: 100vw;
             position: fixed;
+            overscroll-behavior: none;
         }
         #root {
-            height: 100%;
             height: 100dvh;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
         .font-orbitron { font-family: 'Orbitron', sans-serif; }
         .mono { font-family: 'JetBrains Mono', monospace; }
@@ -58,12 +59,6 @@
             z-index: -1;
         }
 
-        .glass-panel {
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(79, 70, 229, 0.1);
-        }
-
         /* Responsive Safe Areas */
         .safe-pb { padding-bottom: env(safe-area-inset-bottom); }
         .safe-pt { padding-top: env(safe-area-inset-top); }
@@ -71,9 +66,8 @@
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-thumb { background: rgba(79, 70, 229, 0.3); border-radius: 10px; }
         
-        /* Utility to ensure flex children don't overflow parent */
         .min-h-0 { min-height: 0; }
-        .min-w-0 { min-width: 0; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
     </style>
 <script type="importmap">
 {
@@ -97,12 +91,5 @@
     <div class="cyber-grid"></div>
     <div id="root"></div>
 <script type="module" src="/index.tsx"></script>
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW registration failed:', err));
-    });
-  }
-</script>
 </body>
 </html>
