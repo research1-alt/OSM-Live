@@ -653,7 +653,7 @@ const App: React.FC = () => {
   if (!user) return <AuthScreen onAuthenticated={handleAuthenticated} />;
 
   return (
-    <div className="h-screen w-full font-inter">
+    <div className="h-full w-full font-inter flex flex-col min-h-0 overflow-hidden bg-white">
       {/* PWA Install HUD Overlay */}
       {showInstallOverlay && (
         <PWAInstallOverlay 
@@ -663,7 +663,7 @@ const App: React.FC = () => {
       )}
 
       {view === 'home' ? (
-        <div className="h-full w-full flex flex-col items-center justify-center bg-white px-6 relative overflow-hidden">
+        <div className="flex-1 w-full flex flex-col items-center justify-center bg-white px-6 relative overflow-hidden">
           <div className="bg-indigo-600 p-6 rounded-[32px] text-white shadow-2xl mb-12 animate-bounce"><Cpu size={64} /></div>
           <h1 className="text-4xl md:text-8xl font-orbitron font-black text-slate-900 uppercase text-center">OSM <span className="text-indigo-600">LIVE</span></h1>
           <div className="flex flex-col gap-4 w-full max-w-xs mt-12 text-center relative z-10">
@@ -671,11 +671,15 @@ const App: React.FC = () => {
           </div>
         </div>
       ) : view === 'select' ? (
-        <FeatureSelector onSelect={(v) => setView(v)} />
+        <div className="flex-1 w-full overflow-y-auto min-h-0">
+          <FeatureSelector onSelect={(v) => setView(v)} />
+        </div>
       ) : view === 'decoder' ? (
-        <DataDecoder library={library} onExit={() => setView('select')} />
+        <div className="flex-1 w-full overflow-hidden min-h-0">
+          <DataDecoder library={library} onExit={() => setView('select')} />
+        </div>
       ) : (
-        <div className="h-full w-full flex flex-col bg-slate-50 safe-pt overflow-hidden relative">
+        <div className="flex-1 w-full flex flex-col bg-slate-50 safe-pt overflow-hidden relative min-h-0">
           <header className="h-14 md:h-16 border-b flex items-center justify-between px-4 md:px-6 bg-white shrink-0 z-[100]">
             <div className="flex items-center gap-3 md:gap-4">
               <button onClick={() => setView('select')} className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft size={18} /></button>
@@ -692,14 +696,16 @@ const App: React.FC = () => {
 
           <main className="flex-1 overflow-hidden relative flex flex-col min-h-0">
             {dashboardTab === 'link' ? (
-              <ConnectionPanel 
-                status={bridgeStatus} 
-                hardwareMode={hardwareMode} 
-                onSetHardwareMode={setHardwareMode} 
-                onConnect={handleConnect} 
-                onDisconnect={disconnectHardware} 
-                debugLog={debugLog}
-              />
+              <div className="flex-1 overflow-y-auto min-h-0">
+                <ConnectionPanel 
+                  status={bridgeStatus} 
+                  hardwareMode={hardwareMode} 
+                  onSetHardwareMode={setHardwareMode} 
+                  onConnect={handleConnect} 
+                  onDisconnect={disconnectHardware} 
+                  debugLog={debugLog}
+                />
+              </div>
             ) : dashboardTab === 'analysis' ? (
               <TraceAnalysisDashboard 
                 frames={frames} 
@@ -729,7 +735,7 @@ const App: React.FC = () => {
                 activeSchedules={activeSchedules}
               />
             ) : dashboardTab === 'trace' ? (
-              <div className="flex-1 flex flex-col overflow-hidden p-2 md:p-4 gap-4">
+              <div className="flex-1 flex flex-col overflow-hidden p-2 md:p-4 gap-4 min-h-0">
                  <CANMonitor 
                     frames={frames} 
                     isPaused={isPaused} 

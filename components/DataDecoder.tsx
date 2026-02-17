@@ -85,14 +85,8 @@ const DataDecoder: React.FC<DataDecoderProps> = ({ library, onExit }) => {
     
     if (isNaN(startSoc) || isNaN(endSoc) || socTimeline.length === 0) return;
 
-    // Find the time window corresponding to these SOC values
-    // We assume the user wants the segment where SOC was between these two values
-    // Find the first occurrence of startSoc and the last occurrence of endSoc (or vice-versa)
-    
-    // Sort SOC points by time just in case
     const sortedTimeline = [...socTimeline].sort((a, b) => a.timestamp - b.timestamp);
     
-    // Find timestamps where SOC is closest to start and end
     const findTimeForSoc = (targetSoc: number) => {
       let closest = sortedTimeline[0];
       let minDiff = Math.abs(sortedTimeline[0].soc - targetSoc);
@@ -110,7 +104,6 @@ const DataDecoder: React.FC<DataDecoderProps> = ({ library, onExit }) => {
     const tStart = findTimeForSoc(startSoc);
     const tEnd = findTimeForSoc(endSoc);
 
-    // Set the window based on time bounds found
     setActiveRange({
       start: Math.min(tStart, tEnd),
       end: Math.max(tStart, tEnd)
@@ -123,13 +116,11 @@ const DataDecoder: React.FC<DataDecoderProps> = ({ library, onExit }) => {
     setActiveRange(null);
   };
 
-  // Filtered frames based on range selection
   const filteredFrames = useMemo(() => {
     if (!activeRange) return offlineFrames;
     return offlineFrames.filter(f => f.timestamp >= activeRange.start && f.timestamp <= activeRange.end);
   }, [offlineFrames, activeRange]);
 
-  // Pre-calculate DBC lookup map for speed and accuracy
   const dbcLookup = useMemo(() => {
     const map = new Map<string, DBCMessage>();
     if (!library?.database) return map;
@@ -149,7 +140,6 @@ const DataDecoder: React.FC<DataDecoderProps> = ({ library, onExit }) => {
     return map;
   }, [filteredFrames]);
 
-  // Detected Faults Logic (using filtered frames)
   const detectedFaults = useMemo(() => {
     const faults: Array<{ timestamp: number, message: string, id: string, type: 'BATT' | 'MCU' }> = [];
     if (filteredFrames.length === 0) return [];
@@ -178,7 +168,6 @@ const DataDecoder: React.FC<DataDecoderProps> = ({ library, onExit }) => {
     return faults.sort((a, b) => b.timestamp - a.timestamp);
   }, [filteredFrames, dbcLookup]);
 
-  // Deep Statistics Calculation (using filtered frames)
   const signalStats = useMemo(() => {
     if (filteredFrames.length === 0) return [];
     const statsMap: Record<string, { 
@@ -373,140 +362,118 @@ const DataDecoder: React.FC<DataDecoderProps> = ({ library, onExit }) => {
   }, [chatHistory]);
 
   return (
-    <div className="h-full w-full flex flex-col bg-slate-50">
-      <header className="h-16 bg-white border-b flex items-center justify-between px-6 shrink-0 z-[100] shadow-sm">
-        <div className="flex items-center gap-4">
-          <button onClick={onExit} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-            <ArrowLeft size={20} />
+    <div className="h-full w-full flex flex-col bg-slate-50 min-h-0 overflow-hidden">
+      <header className="h-14 md:h-16 bg-white border-b flex items-center justify-between px-4 md:px-6 shrink-0 z-[110] shadow-sm">
+        <div className="flex items-center gap-3 md:gap-4 overflow-hidden">
+          <button onClick={onExit} className="p-1.5 md:p-2 hover:bg-slate-100 rounded-full transition-colors shrink-0">
+            <ArrowLeft size={18} />
           </button>
-          <div>
-            <h2 className="text-lg font-orbitron font-black text-slate-900 uppercase tracking-tight">DATA_DECODER</h2>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Tactical Analysis Suite</p>
+          <div className="min-w-0">
+            <h2 className="text-xs md:text-lg font-orbitron font-black text-slate-900 uppercase tracking-tight truncate">DATA_DECODER</h2>
+            <p className="text-[7px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest truncate">Tactical Analysis Suite</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {offlineFrames.length > 0 && (
-            <div className="hidden md:flex items-center gap-4 mr-6 px-4 py-1.5 bg-slate-50 rounded-xl border border-slate-100">
-               <span className="text-[8px] font-orbitron font-black text-slate-400 uppercase">Current Window:</span>
-               <span className="text-[9px] font-mono font-bold text-indigo-600">{filteredFrames.length.toLocaleString()} / {offlineFrames.length.toLocaleString()} Frames</span>
-            </div>
-          )}
-          
+        <div className="flex items-center gap-2">
           {offlineFrames.length > 0 && (
             <button 
               onClick={handleSaveDecodedData}
               disabled={isExporting}
-              className={`flex items-center gap-2 px-5 py-2 rounded-xl text-[10px] font-orbitron font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 ${
-                isExporting ? 'bg-amber-600 text-white animate-pulse' : 'bg-white border border-slate-200 text-indigo-600 hover:border-indigo-600'
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[8px] md:text-[10px] font-orbitron font-black uppercase tracking-widest transition-all shadow active:scale-95 shrink-0 ${
+                isExporting ? 'bg-amber-600 text-white animate-pulse' : 'bg-white border border-slate-200 text-indigo-600'
               }`}
             >
-              {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {isExporting ? 'EXPORTING...' : 'SAVE_WINDOW'}
+              {isExporting ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              <span className="hidden xs:inline">{isExporting ? 'EXPORTING' : 'SAVE'}</span>
             </button>
           )}
 
-          <label className="flex items-center gap-2 px-5 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-orbitron font-black uppercase tracking-widest shadow-lg hover:bg-indigo-700 transition-all cursor-pointer active:scale-95">
-            <Upload size={14} />
-            {offlineFrames.length > 0 ? 'REPLACE_LOG' : 'UPLOAD_TRC'}
+          <label className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-[8px] md:text-[10px] font-orbitron font-black uppercase tracking-widest shadow-lg hover:bg-indigo-700 transition-all cursor-pointer active:scale-95 shrink-0">
+            <Upload size={12} />
+            <span className="hidden sm:inline">{offlineFrames.length > 0 ? 'REPLACE' : 'UPLOAD'}</span>
             <input type="file" accept=".trc,.txt" onChange={handleFileUpload} className="hidden" />
           </label>
         </div>
       </header>
 
-      {/* SOC Range Filter Bar */}
+      {/* SOC Range Filter Bar - Consolidated for Mobile */}
       {offlineFrames.length > 0 && (
-        <div className="bg-slate-900 px-6 py-4 flex flex-col md:flex-row items-center gap-4 border-b border-slate-800 z-50">
-          <div className="flex items-center gap-3 shrink-0">
-             <div className="p-2 bg-indigo-600 rounded-lg text-white"><Battery size={16} /></div>
-             <div className="flex flex-col">
-                <span className="text-[10px] font-orbitron font-black text-white uppercase tracking-widest">SOC_BASED_FILTER</span>
+        <div className="bg-slate-900 px-4 md:px-6 py-2 md:py-4 flex flex-col md:flex-row items-center gap-2 md:gap-4 border-b border-slate-800 z-[105] shrink-0">
+          <div className="flex items-center gap-2 w-full md:w-auto shrink-0">
+             <div className="p-1.5 bg-indigo-600 rounded-lg text-white"><Battery size={14} /></div>
+             <div className="flex flex-col min-w-0">
+                <span className="text-[8px] md:text-[10px] font-orbitron font-black text-white uppercase tracking-widest truncate">SOC_FILTER</span>
                 {availableSocRange && (
-                  <span className="text-[8px] font-mono text-indigo-300 uppercase">Available: {availableSocRange.min}% - {availableSocRange.max}%</span>
+                  <span className="text-[7px] font-mono text-indigo-300 uppercase truncate">Rng: {availableSocRange.min}%-{availableSocRange.max}%</span>
                 )}
              </div>
           </div>
           
-          <div className="flex-1 flex flex-wrap items-center gap-3">
-             <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl px-4 py-1.5 flex-1 min-w-[150px]">
-                <span className="text-[8px] font-orbitron font-black text-slate-500 uppercase whitespace-nowrap">START SOC %:</span>
+          <div className="w-full flex items-center gap-2">
+             <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 flex-1">
+                <span className="text-[7px] font-orbitron font-black text-slate-500 uppercase">IN:</span>
                 <input 
                   type="number" 
                   value={filterStartSoc}
                   onChange={(e) => setFilterStartSoc(e.target.value)}
-                  placeholder={availableSocRange ? `${availableSocRange.max}%` : '100'}
-                  className="bg-transparent border-none text-[11px] font-mono text-emerald-400 focus:outline-none w-full placeholder:text-slate-600"
+                  className="bg-transparent border-none text-[10px] font-mono text-emerald-400 focus:outline-none w-full"
                 />
              </div>
-             <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl px-4 py-1.5 flex-1 min-w-[150px]">
-                <span className="text-[8px] font-orbitron font-black text-slate-500 uppercase whitespace-nowrap">END SOC %:</span>
+             <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 flex-1">
+                <span className="text-[7px] font-orbitron font-black text-slate-500 uppercase">OUT:</span>
                 <input 
                   type="number" 
                   value={filterEndSoc}
                   onChange={(e) => setFilterEndSoc(e.target.value)}
-                  placeholder={availableSocRange ? `${availableSocRange.min}%` : '0'}
-                  className="bg-transparent border-none text-[11px] font-mono text-emerald-400 focus:outline-none w-full placeholder:text-slate-600"
+                  className="bg-transparent border-none text-[10px] font-mono text-emerald-400 focus:outline-none w-full"
                 />
              </div>
-             <div className="flex gap-2 shrink-0">
-               <button 
-                  onClick={applySocFilter}
-                  disabled={socTimeline.length === 0}
-                  className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-orbitron font-black uppercase tracking-widest shadow-lg hover:bg-indigo-500 transition-all active:scale-95 disabled:opacity-30"
-               >
-                  UPDATE_RANGE
-               </button>
-               {activeRange && (
-                 <button 
-                    onClick={clearFilter}
-                    className="p-2 bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-all"
-                 >
-                    <XCircle size={18} />
-                 </button>
-               )}
-             </div>
+             <button 
+                onClick={applySocFilter}
+                disabled={socTimeline.length === 0}
+                className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-[8px] font-orbitron font-black uppercase tracking-widest shadow shadow-indigo-500/20 active:scale-95 disabled:opacity-30"
+             >
+                GO
+             </button>
+             {activeRange && (
+               <button onClick={clearFilter} className="p-2 bg-slate-700 text-slate-300 rounded-lg"><XCircle size={14} /></button>
+             )}
           </div>
-          
-          {activeRange && (
-             <div className="hidden lg:flex items-center gap-2 px-4 py-1.5 bg-indigo-900/40 border border-indigo-500/30 rounded-xl animate-pulse">
-                <span className="text-[8px] font-orbitron font-black text-indigo-300 uppercase">SOC_WINDOW_ACTIVE</span>
-             </div>
-          )}
         </div>
       )}
 
       <main className="flex-1 overflow-hidden flex flex-col min-h-0">
         {offlineFrames.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
-            <div className="w-24 h-24 bg-white border border-slate-100 text-indigo-600 rounded-[32px] flex items-center justify-center mb-8 shadow-2xl animate-pulse">
-              <Database size={48} />
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-white">
+            <div className="w-16 h-16 bg-white border border-slate-100 text-indigo-600 rounded-2xl flex items-center justify-center mb-6 shadow animate-pulse">
+              <Database size={32} />
             </div>
-            <h3 className="text-xl font-orbitron font-black text-slate-900 uppercase tracking-[0.4em]">AWAITING_FILE_STREAM</h3>
-            <p className="text-[10px] font-bold text-slate-400 uppercase mt-4 max-w-sm leading-relaxed">
-              Import a PCAN-View .trc log file to begin deep-packet decoding with SOC windowing.
+            <h3 className="text-sm md:text-xl font-orbitron font-black text-slate-900 uppercase tracking-[0.3em]">AWAITING_FILE</h3>
+            <p className="text-[8px] md:text-[10px] font-bold text-slate-400 uppercase mt-4 max-w-xs leading-relaxed">
+              Import a PCAN-View .trc log file to begin analysis.
             </p>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <nav className="h-14 bg-white border-b px-6 flex items-center gap-2 md:gap-8 shrink-0 z-50 overflow-x-auto no-scrollbar">
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            <nav className="h-12 md:h-14 bg-white border-b px-2 md:px-6 flex items-center gap-1 md:gap-4 shrink-0 z-[100] overflow-x-auto no-scrollbar">
                {[
-                 { id: 'visualizer', label: 'Visualizer', icon: Activity },
-                 { id: 'diagnostics', label: 'Diagnostics', icon: ShieldAlert },
-                 { id: 'data', label: 'Data Stats', icon: TrendingUp },
-                 { id: 'chat', label: 'Chat with AI', icon: BrainCircuit }
+                 { id: 'visualizer', label: 'Graphs', icon: Activity },
+                 { id: 'diagnostics', label: 'Faults', icon: ShieldAlert },
+                 { id: 'data', label: 'Stats', icon: TrendingUp },
+                 { id: 'chat', label: 'AI', icon: BrainCircuit }
                ].map(t => (
                 <button 
                   key={t.id}
                   onClick={() => setTab(t.id as any)}
-                  className={`flex items-center gap-2.5 px-5 h-full border-b-2 transition-all whitespace-nowrap group ${tab === t.id ? 'border-indigo-600 text-indigo-600 bg-indigo-50/30' : 'border-transparent text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+                  className={`flex items-center gap-1.5 px-3 md:px-5 h-full border-b-2 transition-all whitespace-nowrap group ${tab === t.id ? 'border-indigo-600 text-indigo-600 bg-indigo-50/30' : 'border-transparent text-slate-400'}`}
                 >
-                  <t.icon size={16} className={tab === t.id ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'} />
-                  <span className="text-[10px] font-orbitron font-black uppercase tracking-widest">{t.label}</span>
+                  <t.icon size={14} />
+                  <span className="text-[8px] md:text-[10px] font-orbitron font-black uppercase tracking-wider">{t.label}</span>
                 </button>
                ))}
             </nav>
 
-            <div className="flex-1 overflow-hidden relative">
+            <div className="flex-1 overflow-hidden relative min-h-0">
               {tab === 'visualizer' ? (
                 <LiveVisualizerDashboard 
                   frames={filteredFrames} 
@@ -517,56 +484,41 @@ const DataDecoder: React.FC<DataDecoderProps> = ({ library, onExit }) => {
                   isOffline={true} 
                 />
               ) : tab === 'diagnostics' ? (
-                <div className="h-full flex flex-col p-4 md:p-8 overflow-y-auto custom-scrollbar bg-white">
-                  <div className="max-w-4xl mx-auto w-full space-y-8">
-                    <header className="flex flex-col gap-2">
-                       <h3 className="text-2xl font-orbitron font-black text-slate-900 uppercase flex items-center gap-4">
-                         <ShieldAlert className="text-red-600" size={32} /> FAULT_DIAGNOSTICS_ENGINE
+                <div className="h-full flex flex-col p-4 overflow-y-auto custom-scrollbar bg-white">
+                  <div className="max-w-4xl mx-auto w-full space-y-4 md:space-y-8">
+                    <header className="flex flex-col gap-1">
+                       <h3 className="text-sm md:text-2xl font-orbitron font-black text-slate-900 uppercase flex items-center gap-2 md:gap-4">
+                         <ShieldAlert className="text-red-600" size={20} /> FAULT_ENGINE
                        </h3>
-                       <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Active scanning for Battery & MCU Fault Vectors</p>
                     </header>
-
                     {detectedFaults.length === 0 ? (
-                      <div className="py-32 flex flex-col items-center justify-center text-center opacity-30">
-                        <Zap size={64} className="text-emerald-500 mb-6" />
-                        <h4 className="text-xl font-orbitron font-black uppercase tracking-widest text-emerald-600">All_Systems_Nominal</h4>
-                        <p className="text-[10px] font-bold uppercase mt-2">No critical fault bits detected in the trace duration</p>
+                      <div className="py-20 flex flex-col items-center justify-center text-center opacity-30">
+                        <Zap size={48} className="text-emerald-500 mb-4" />
+                        <h4 className="text-xs md:text-xl font-orbitron font-black uppercase text-emerald-600">Nominal</h4>
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        <div className="bg-red-50 border border-red-100 rounded-[32px] p-8 flex items-center justify-between shadow-sm mb-8">
+                        <div className="bg-red-50 border border-red-100 rounded-2xl p-4 md:p-8 flex items-center justify-between">
                           <div>
-                            <p className="text-[9px] font-orbitron font-black text-red-400 uppercase tracking-[0.3em]">Total_Fault_Events</p>
-                            <p className="text-4xl font-orbitron font-black text-red-600">{detectedFaults.length}</p>
+                            <p className="text-[7px] font-orbitron font-black text-red-400 uppercase tracking-widest">Fault_Events</p>
+                            <p className="text-2xl md:text-4xl font-orbitron font-black text-red-600">{detectedFaults.length}</p>
                           </div>
-                          <div className="text-right">
-                             <AlertTriangle size={48} className="text-red-500 animate-bounce" />
-                          </div>
+                          <AlertTriangle size={24} className="text-red-500" />
                         </div>
-
-                        <div className="bg-white border border-slate-200 rounded-[40px] shadow-2xl overflow-hidden">
-                           <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
-                              <h4 className="text-[10px] font-orbitron font-black text-slate-800 uppercase tracking-widest">Fault_Event_Log</h4>
-                           </div>
+                        <div className="bg-white border border-slate-200 rounded-2xl md:rounded-[40px] shadow overflow-hidden">
                            <div className="divide-y divide-slate-50">
                               {detectedFaults.map((f, i) => (
-                                <div key={i} className="p-6 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                                  <div className="flex items-center gap-5">
-                                    <div className={`p-3 rounded-2xl ${f.type === 'BATT' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700 shadow-sm'}`}>
-                                      {f.type === 'BATT' ? <Battery size={18} /> : <Zap size={18} />}
+                                <div key={i} className="p-4 flex items-center justify-between hover:bg-slate-50">
+                                  <div className="flex items-center gap-3">
+                                    <div className={`p-2 rounded-lg ${f.type === 'BATT' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                                      {f.type === 'BATT' ? <Battery size={14} /> : <Zap size={14} />}
                                     </div>
-                                    <div>
-                                      <p className="text-[12px] font-black text-slate-900 uppercase tracking-tight">{f.message}</p>
-                                      <p className="text-[9px] font-mono text-slate-400 uppercase mt-1">Source: {f.type}_VECTOR_ANALYSIS</p>
+                                    <div className="min-w-0">
+                                      <p className="text-[10px] md:text-[12px] font-black text-slate-900 uppercase truncate">{f.message}</p>
+                                      <p className="text-[7px] font-mono text-slate-400 uppercase truncate">@{f.timestamp.toFixed(2)}ms</p>
                                     </div>
                                   </div>
-                                  <div className="text-right flex items-center gap-4">
-                                    <div className="hidden md:block">
-                                      <p className="text-[8px] font-orbitron font-black text-slate-300 uppercase">Timestamp</p>
-                                      <p className="text-[11px] font-mono font-bold text-slate-500">{f.timestamp.toFixed(6)}ms</p>
-                                    </div>
-                                    <ChevronRight size={16} className="text-slate-200" />
-                                  </div>
+                                  <ChevronRight size={14} className="text-slate-200" />
                                 </div>
                               ))}
                            </div>
@@ -576,72 +528,59 @@ const DataDecoder: React.FC<DataDecoderProps> = ({ library, onExit }) => {
                   </div>
                 </div>
               ) : tab === 'data' ? (
-                <div className="h-full flex flex-col p-4 md:p-8 overflow-y-auto custom-scrollbar bg-white">
-                  <div className="max-w-6xl mx-auto w-full space-y-8">
-                    <header className="flex flex-col gap-2">
-                       <h3 className="text-2xl font-orbitron font-black text-slate-900 uppercase">SIGNAL_STATISTICS_MATRIX</h3>
-                       <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Aggregated performance data</p>
-                    </header>
-
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                      <div className="bg-slate-50 p-6 rounded-[32px] border border-slate-100 shadow-sm flex items-center gap-5">
-                        <div className="p-4 bg-white text-indigo-600 rounded-2xl shadow-sm"><Zap size={24} /></div>
+                <div className="h-full flex flex-col p-4 overflow-y-auto custom-scrollbar bg-white">
+                  <div className="max-w-6xl mx-auto w-full space-y-4 md:space-y-8">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
+                      <div className="bg-slate-50 p-3 md:p-6 rounded-2xl md:rounded-[32px] border border-slate-100 flex items-center gap-3 md:gap-5">
+                        <Zap size={16} className="text-indigo-600" />
                         <div>
-                          <p className="text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest">Packets</p>
-                          <p className="text-2xl font-orbitron font-black text-slate-900">{filteredFrames.length.toLocaleString()}</p>
+                          <p className="text-[7px] md:text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest">Packets</p>
+                          <p className="text-xs md:text-2xl font-orbitron font-black text-slate-900">{filteredFrames.length.toLocaleString()}</p>
                         </div>
                       </div>
-                      <div className="bg-red-50 p-6 rounded-[32px] border border-red-100 shadow-sm flex items-center gap-5">
-                        <div className="p-4 bg-white text-red-600 rounded-2xl shadow-sm"><ShieldAlert size={24} /></div>
+                      <div className="bg-red-50 p-3 md:p-6 rounded-2xl md:rounded-[32px] border border-red-100 flex items-center gap-3 md:gap-5">
+                        <ShieldAlert size={16} className="text-red-600" />
                         <div>
-                          <p className="text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest">Faults Detected</p>
-                          <p className="text-2xl font-orbitron font-black text-red-600">{detectedFaults.length}</p>
+                          <p className="text-[7px] md:text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest">Faults</p>
+                          <p className="text-xs md:text-2xl font-orbitron font-black text-red-600">{detectedFaults.length}</p>
                         </div>
                       </div>
-                      <div className="bg-slate-50 p-6 rounded-[32px] border border-slate-100 shadow-sm flex items-center gap-5">
-                        <div className="p-4 bg-white text-emerald-600 rounded-2xl shadow-sm"><Activity size={24} /></div>
+                      <div className="bg-slate-50 p-3 md:p-6 rounded-2xl md:rounded-[32px] border border-slate-100 flex items-center gap-3 md:gap-5">
+                        <Activity size={16} className="text-emerald-600" />
                         <div>
-                          <p className="text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest">Signals</p>
-                          <p className="text-2xl font-orbitron font-black text-slate-900">{signalStats.length}</p>
+                          <p className="text-[7px] md:text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest">Signals</p>
+                          <p className="text-xs md:text-2xl font-orbitron font-black text-slate-900">{signalStats.length}</p>
                         </div>
                       </div>
-                      <div className="bg-slate-50 p-6 rounded-[32px] border border-slate-100 shadow-sm flex items-center gap-5">
-                        <div className="p-4 bg-white text-amber-600 rounded-2xl shadow-sm"><Clock size={24} /></div>
+                      <div className="bg-slate-50 p-3 md:p-6 rounded-2xl md:rounded-[32px] border border-slate-100 flex items-center gap-3 md:gap-5">
+                        <Clock size={16} className="text-amber-600" />
                         <div>
-                          <p className="text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest">Duration</p>
-                          <p className="text-2xl font-orbitron font-black text-slate-900">
-                            {filteredFrames.length > 0 ? ((filteredFrames[filteredFrames.length-1].timestamp - filteredFrames[0].timestamp) / 1000).toFixed(2) : 0}sec
+                          <p className="text-[7px] md:text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest">Time</p>
+                          <p className="text-xs md:text-2xl font-orbitron font-black text-slate-900">
+                            {filteredFrames.length > 0 ? ((filteredFrames[filteredFrames.length-1].timestamp - filteredFrames[0].timestamp) / 1000).toFixed(1) : 0}s
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="bg-white border border-slate-200 rounded-[40px] shadow-2xl overflow-hidden flex flex-col mt-8">
-                      <div className="p-8 border-b bg-slate-50/50 flex items-center justify-between">
-                         <h4 className="text-[11px] font-orbitron font-black text-slate-800 uppercase tracking-widest">Decoded_Signal_Performance_Data</h4>
-                         <span className="text-[9px] font-mono text-slate-400 uppercase">Window_Size: {filteredFrames.length} Frames</span>
-                      </div>
+                    <div className="bg-white border border-slate-200 rounded-2xl md:rounded-[40px] shadow flex flex-col min-h-0">
                       <div className="overflow-x-auto">
-                        <table className="w-full border-collapse font-mono text-[11px]">
-                          <thead className="bg-white text-slate-400 text-left border-b border-slate-100">
+                        <table className="w-full border-collapse font-mono text-[9px] md:text-[11px]">
+                          <thead className="bg-slate-50 text-slate-400 text-left border-b border-slate-100">
                             <tr>
-                              <th className="px-8 py-5">SIGNAL_NAME</th>
-                              <th className="px-6 py-5">MIN</th>
-                              <th className="px-6 py-5">MAX</th>
-                              <th className="px-6 py-5">AVG</th>
-                              <th className="px-6 py-5">SAMPLES</th>
+                              <th className="px-4 md:px-8 py-3 md:py-5">SIGNAL</th>
+                              <th className="px-3 md:px-6 py-3 md:py-5">MIN</th>
+                              <th className="px-3 md:px-6 py-3 md:py-5">MAX</th>
+                              <th className="px-3 md:px-6 py-3 md:py-5">AVG</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
                             {signalStats.map(stat => (
-                              <tr key={stat.name} className="hover:bg-slate-50 transition-colors h-14">
-                                <td className="px-8 py-3 font-black text-slate-800 uppercase tracking-tighter">
-                                  {stat.name.replace(/_/g, ' ')}
-                                </td>
-                                <td className="px-6 py-3 font-bold text-emerald-600">{stat.min.toFixed(2)} {stat.unit}</td>
-                                <td className="px-6 py-3 font-bold text-red-600">{stat.max.toFixed(2)} {stat.unit}</td>
-                                <td className="px-6 py-3 font-bold text-indigo-600 bg-indigo-50/30">{stat.avg.toFixed(2)} {stat.unit}</td>
-                                <td className="px-6 py-3 text-slate-400">{stat.count.toLocaleString()}</td>
+                              <tr key={stat.name} className="h-10 md:h-14">
+                                <td className="px-4 md:px-8 py-2 font-black text-slate-800 uppercase truncate max-w-[120px] md:max-w-none">{stat.name.replace(/_/g, ' ')}</td>
+                                <td className="px-3 md:px-6 py-2 text-emerald-600">{stat.min.toFixed(1)}</td>
+                                <td className="px-3 md:px-6 py-2 text-red-600">{stat.max.toFixed(1)}</td>
+                                <td className="px-3 md:px-6 py-2 font-bold text-indigo-600">{stat.avg.toFixed(1)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -651,53 +590,39 @@ const DataDecoder: React.FC<DataDecoderProps> = ({ library, onExit }) => {
                   </div>
                 </div>
               ) : (
-                <div className="h-full flex flex-col p-4 md:p-8 overflow-hidden">
-                   <div className="bg-white border border-slate-200 rounded-[40px] flex-1 flex flex-col overflow-hidden shadow-2xl relative">
-                      <div className="p-3 border-b flex items-center gap-2 shrink-0 bg-slate-900 text-white shadow-lg">
-                         <div className="p-1.5 bg-indigo-600 rounded-lg shadow-lg"><BrainCircuit size={14} /></div>
-                         <div>
-                            <h4 className="text-xs font-orbitron font-black uppercase tracking-tight">OSM_CHAT_AGENT</h4>
-                         </div>
-                      </div>
-                      
-                      <div className="flex-1 overflow-y-auto p-6 space-y-6 flex flex-col custom-scrollbar bg-slate-50">
+                <div className="h-full flex flex-col p-2 md:p-8 min-h-0 overflow-hidden">
+                   <div className="bg-white border border-slate-200 rounded-2xl md:rounded-[40px] flex-1 flex flex-col overflow-hidden shadow relative min-h-0">
+                      <div className="flex-1 overflow-y-auto p-4 space-y-4 flex flex-col custom-scrollbar bg-slate-50">
                          {chatHistory.map((msg, i) => (
-                           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2`}>
-                              <div className={`max-w-[85%] p-5 rounded-[24px] text-[11px] leading-relaxed shadow-xl ${
-                                msg.role === 'user' 
-                                  ? 'bg-indigo-600 text-white border-indigo-700 rounded-tr-none' 
-                                  : 'bg-white text-slate-800 border-slate-100 rounded-tl-none font-mono whitespace-pre-wrap'
+                           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                              <div className={`max-w-[90%] p-4 rounded-xl text-[10px] md:text-[11px] leading-relaxed shadow-sm ${
+                                msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-800 font-mono whitespace-pre-wrap'
                               }`}>
                                 {msg.text}
                               </div>
                            </div>
                          ))}
                          {chatLoading && (
-                           <div className="flex justify-start animate-pulse">
-                              <div className="bg-white p-5 rounded-[24px] border border-slate-100 flex items-center gap-3 shadow-md">
-                                 <Loader2 size={14} className="animate-spin text-indigo-600" />
-                                 <span className="text-[9px] font-orbitron font-black text-slate-400 uppercase tracking-widest">Analyzing_Telemetry...</span>
+                           <div className="flex justify-start">
+                              <div className="bg-white p-4 rounded-xl border border-slate-100 flex items-center gap-2">
+                                 <Loader2 size={12} className="animate-spin text-indigo-600" />
+                                 <span className="text-[8px] font-orbitron font-black text-slate-400">ANALYZING...</span>
                               </div>
                            </div>
                          )}
                          <div ref={chatEndRef} />
                       </div>
-
-                      <div className="p-6 border-t bg-white shrink-0">
-                         <form onSubmit={handleChat} className="flex gap-3 max-w-5xl mx-auto">
+                      <div className="p-4 border-t bg-white shrink-0">
+                         <form onSubmit={handleChat} className="flex gap-2">
                             <input 
                               type="text" 
                               value={chatInput}
                               onChange={(e) => setChatInput(e.target.value)}
-                              placeholder="Query the telemetry matrix..."
-                              className="flex-1 bg-slate-50 border border-slate-200 rounded-[20px] px-6 py-4 text-[11px] font-bold tracking-widest focus:outline-none focus:border-indigo-500/50 shadow-inner"
+                              placeholder="Query log data..."
+                              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-[10px] font-bold outline-none"
                             />
-                            <button 
-                              type="submit"
-                              disabled={chatLoading || !chatInput.trim()}
-                              className="px-6 bg-indigo-600 text-white rounded-[20px] hover:bg-indigo-700 disabled:opacity-50 shadow-xl active:scale-95 transition-all flex items-center justify-center"
-                            >
-                              <Send size={20} />
+                            <button type="submit" disabled={chatLoading || !chatInput.trim()} className="px-4 bg-indigo-600 text-white rounded-xl active:scale-95 transition-all flex items-center justify-center">
+                              <Send size={18} />
                             </button>
                          </form>
                       </div>

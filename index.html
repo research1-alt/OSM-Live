@@ -27,20 +27,27 @@
         * {
             -webkit-tap-highlight-color: transparent;
             user-select: none;
+            box-sizing: border-box;
         }
-        body {
-            font-family: 'Inter', sans-serif;
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
             background-color: #ffffff;
             color: #0f172a;
             overflow: hidden;
-            height: 100vh;
             width: 100vw;
-            position: fixed; /* Prevent pull-to-refresh */
+            position: fixed;
+        }
+        #root {
+            height: 100%;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
         }
         .font-orbitron { font-family: 'Orbitron', sans-serif; }
         .mono { font-family: 'JetBrains Mono', monospace; }
         
-        /* Tactical Grid Background */
         .cyber-grid {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -63,6 +70,10 @@
 
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-thumb { background: rgba(79, 70, 229, 0.3); border-radius: 10px; }
+        
+        /* Utility to ensure flex children don't overflow parent */
+        .min-h-0 { min-height: 0; }
+        .min-w-0 { min-width: 0; }
     </style>
 <script type="importmap">
 {
