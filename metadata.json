@@ -1,8 +1,9 @@
 {
-  "name": "OSM Live | 15_02_2026",
-  "description": "Working \n",
+  "name": "Remix: Mobile OSM LIVE SYSTEM Final",
+  "description": "Professional CAN-Bus monitoring and diagnostic HUD for OSM hardware. Supports real-time telemetry, trace analysis, and hardware identification.\n",
   "requestFramePermissions": [
     "serial",
-    "bluetooth"
+    "bluetooth",
+    "geolocation"
   ]
 }
