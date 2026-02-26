@@ -598,14 +598,42 @@ const App: React.FC = () => {
     }
   }, [hardwareId, user, sessionId]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('osm_currentUser');
     localStorage.removeItem('osm_sid');
     setUser(null);
     setSessionId(null);
     setView('home');
     disconnectHardware();
-  };
+  }, [disconnectHardware]);
+
+  // Session Heartbeat: Detects if account is logged in elsewhere
+  useEffect(() => {
+    if (!user || !sessionId) return;
+
+    const checkSession = async () => {
+      try {
+        const remoteSid = await authService.fetchRemoteSessionId(user.email);
+        // If remote session exists and doesn't match local one, force logout
+        if (remoteSid && remoteSid !== "NOT_FOUND" && remoteSid !== "ERROR" && remoteSid !== sessionId) {
+          addDebugLog("SESSION_CONFLICT: Account logged in on another device.");
+          alert("SESSION_CONFLICT: Your account has been logged in on another device. You will be logged out.");
+          handleLogout();
+        }
+      } catch (e) {
+        console.warn("Heartbeat failed", e);
+      }
+    };
+
+    // Initial check after 2 seconds to avoid race condition with login sync
+    const initialTimeout = setTimeout(checkSession, 2000);
+    const interval = setInterval(checkSession, 15000); // Check every 15 seconds
+    
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [user, sessionId, handleLogout, addDebugLog]);
 
   if (!user) return <AuthScreen onAuthenticated={(u, s) => { localStorage.setItem('osm_currentUser', JSON.stringify(u)); localStorage.setItem('osm_sid', s); setUser(u); setSessionId(s); }} />;
 
