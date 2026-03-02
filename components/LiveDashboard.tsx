@@ -28,6 +28,16 @@ interface LiveDashboardProps {
   // State for Decoded Data
   onSaveDecoded: () => void;
   isSavingDecoded: boolean;
+  msgPerSec: number;
+  showBufferWarning: boolean;
+  onCloseWarning: () => void;
+  isLogging: boolean;
+  loggingFileName: string | null;
+  onStartLogging: () => void;
+  onStopLogging: () => void;
+  isLoggingDecoded: boolean;
+  loggingStartTime: number | null;
+  loggingFileSize: number;
 }
 
 const LiveDashboard: React.FC<LiveDashboardProps> = (props) => {
@@ -56,6 +66,12 @@ const LiveDashboard: React.FC<LiveDashboardProps> = (props) => {
         </button>
 
         <div className="flex-1 flex flex-col items-center min-w-0">
+          {props.isLogging && (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-50 border border-red-100 rounded-full mb-1 animate-pulse">
+              <div className="w-1.5 h-1.5 bg-red-600 rounded-full"></div>
+              <span className="text-[7px] font-orbitron font-black text-red-600 uppercase tracking-wider">REC</span>
+            </div>
+          )}
           <h2 className={`text-[10px] md:text-[12px] font-orbitron font-black uppercase tracking-[0.3em] truncate ${props.isSimulated ? 'text-amber-600' : 'text-indigo-600'}`}>
             {props.isSimulated ? 'HARDWARE_SIMULATION_ACTIVE' : 'HARDWARE_LIVE_SESSION'}
           </h2>
@@ -118,7 +134,7 @@ const LiveDashboard: React.FC<LiveDashboardProps> = (props) => {
       {/* Main Content Area */}
       <main className="flex-1 overflow-hidden flex flex-col min-h-0 bg-white">
         {tab === 'trace' && (
-          <div className="flex-1 p-4 md:p-6 overflow-hidden">
+          <div className="flex-1 p-4 md:p-6 overflow-hidden relative">
             <CANMonitor 
               frames={props.frames}
               isPaused={props.isPaused}
@@ -128,7 +144,39 @@ const LiveDashboard: React.FC<LiveDashboardProps> = (props) => {
               isSaving={props.isSaving}
               autoSaveEnabled={props.autoSaveEnabled}
               onToggleAutoSave={props.onToggleAutoSave}
+              msgPerSec={props.msgPerSec}
+              isLogging={props.isLogging}
+              loggingFileName={props.loggingFileName}
+              onStartLogging={props.onStartLogging}
+              onStopLogging={props.onStopLogging}
+              isLoggingDecoded={props.isLoggingDecoded}
+              loggingStartTime={props.loggingStartTime}
+              loggingFileSize={props.loggingFileSize}
             />
+
+            {/* Buffer Warning Pop-up */}
+            {props.showBufferWarning && (
+              <div className="absolute inset-0 z-[150] flex items-center justify-center p-6">
+                <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={props.onCloseWarning}></div>
+                <div className="relative w-full max-w-sm bg-white rounded-[40px] p-8 shadow-2xl border border-amber-100 animate-in zoom-in duration-300">
+                  <div className="w-16 h-16 bg-amber-100 rounded-3xl flex items-center justify-center text-amber-600 mb-6 mx-auto">
+                    <Database size={32} className="animate-bounce" />
+                  </div>
+                  <h3 className="text-xl font-orbitron font-black text-slate-900 text-center uppercase tracking-tight mb-2">Buffer Critical</h3>
+                  <p className="text-slate-500 text-center text-sm mb-8 leading-relaxed">
+                    Trace buffer has reached <span className="text-amber-600 font-bold">950,000</span> frames. Please use <span className="text-indigo-600 font-bold">START LOGGING</span> to record data directly to your disk and clear memory.
+                  </p>
+                  <div className="space-y-3">
+                    <button 
+                      onClick={props.onCloseWarning}
+                      className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-orbitron font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+                    >
+                      I Understand
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

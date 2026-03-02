@@ -612,6 +612,9 @@ const App: React.FC = () => {
     if (!user || !sessionId) return;
 
     const checkSession = async () => {
+      // Skip session conflict check for admin users to allow multiple device access
+      if (isAdmin) return;
+
       try {
         const remoteSid = await authService.fetchRemoteSessionId(user.email);
         // If remote session exists and doesn't match local one, force logout
